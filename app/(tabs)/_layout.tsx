@@ -31,9 +31,10 @@ import { useTheme } from '../../lib/themeContext';
  * bar's active state along with the rest of the app. Midnight's
  * tab colors (#FFFFFF / #666666) are exactly Rewards' hardcoded ones.
  *
- * 5 tabs (consolidated Oct 15, 2026): Today, Browse (Saved merged in),
- * Companion, Journal (Wellness tools merged in), Settings. Music is
- * its own screen (/music), reached from the Today tab.
+ * 5 tabs (consolidated Oct 15, 2026; revised in 2.0): Today, Browse
+ * (Saved merged in), Music (promoted to a full tab in 2.0 — the
+ * Haven AI companion tab was removed in 2.0), Journal (Wellness
+ * tools merged in), Settings.
  */
 export default function TabsLayout() {
   const { t } = useStrings();
@@ -70,14 +71,14 @@ export default function TabsLayout() {
         />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger
-        name="companion"
+        name="music"
         contentStyle={{ backgroundColor: palette.background }}
         disableTransparentOnScrollEdge
       >
-        <NativeTabs.Trigger.Label>{t('tabs.companion')}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t('tabs.music')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'face.smiling', selected: 'face.smiling.fill' }}
-          md="mood"
+          sf={{ default: 'music.note', selected: 'music.note' }}
+          md="music_note"
         />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger

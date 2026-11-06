@@ -16,8 +16,6 @@ import {
   setNotifEnabled,
   setOnboarded,
   setPlan,
-  setCompanionEnabled,
-  setStreakBuddyEnabled,
   setRitualsEnabled,
 } from '../lib/storage';
 import { ensureDailyQuotesScheduled, requestPermission } from '../lib/notifications';
@@ -75,8 +73,6 @@ export default function Onboarding() {
   const [tracks, setTracks] = useState<TrackId[]>(['motivation', 'gratitude', 'resilience']);
   const [goals, setGoalsState] = useState<GoalId[]>([]);
   const [reminder, setReminder] = useState<string>('8am');
-  const [wantCompanion, setWantCompanion] = useState(true);
-  const [wantBuddy, setWantBuddy] = useState(true);
   const [wantRituals, setWantRituals] = useState(true);
   const [busy, setBusy] = useState(false);
   const [selectedSku, setSelectedSku] = useState<string>(SKUS[0]);
@@ -135,8 +131,6 @@ export default function Onboarding() {
       await setGoals(goals);
       await setReminderTime(reminder);
       await setPlan('haven'); // Everyone starts on free; premium is opt-in
-      await setCompanionEnabled(wantCompanion);
-      await setStreakBuddyEnabled(wantBuddy);
       await setRitualsEnabled(wantRituals);
       if (enableNotif && reminder !== 'none') {
         const granted = await requestPermission();
@@ -271,28 +265,6 @@ export default function Onboarding() {
               {tr('onboarding.makeItYoursSub')}
             </Text>
             <View style={styles.list}>
-              <Pressable onPress={() => setWantCompanion(!wantCompanion)}>
-                <Glass style={[styles.opt, wantCompanion && styles.optActive]}>
-                  <View style={styles.optInfo}>
-                    <Text style={styles.optText}>{tr('settings.aiCompanion')}</Text>
-                    <Text style={styles.optDesc}>{tr('onboarding.companionDesc')}</Text>
-                  </View>
-                  <View style={[styles.toggle, wantCompanion && styles.toggleOn]}>
-                    <View style={[styles.knob, wantCompanion && styles.knobOn]} />
-                  </View>
-                </Glass>
-              </Pressable>
-              <Pressable onPress={() => setWantBuddy(!wantBuddy)}>
-                <Glass style={[styles.opt, wantBuddy && styles.optActive]}>
-                  <View style={styles.optInfo}>
-                    <Text style={styles.optText}>{tr('settings.streakBuddy')}</Text>
-                    <Text style={styles.optDesc}>{tr('onboarding.buddyDesc')}</Text>
-                  </View>
-                  <View style={[styles.toggle, wantBuddy && styles.toggleOn]}>
-                    <View style={[styles.knob, wantBuddy && styles.knobOn]} />
-                  </View>
-                </Glass>
-              </Pressable>
               <Pressable onPress={() => setWantRituals(!wantRituals)}>
                 <Glass style={[styles.opt, wantRituals && styles.optActive]}>
                   <View style={styles.optInfo}>
@@ -305,9 +277,6 @@ export default function Onboarding() {
                 </Glass>
               </Pressable>
             </View>
-            <Text style={styles.freeNote}>
-              {tr('onboarding.freeNoteAi')}
-            </Text>
           </View>
         )}
 
@@ -346,15 +315,6 @@ export default function Onboarding() {
                   <Text style={styles.optDesc}>{tr('onboarding.rooms.breathe.desc')}</Text>
                 </View>
               </Glass>
-              {wantCompanion && (
-                <Glass style={styles.roomCard}>
-                  <Text style={styles.roomEmoji}>💛</Text>
-                  <View style={styles.optInfo}>
-                    <Text style={styles.optText}>{tr('onboarding.rooms.companion.name')}</Text>
-                    <Text style={styles.optDesc}>{tr('onboarding.rooms.companion.desc')}</Text>
-                  </View>
-                </Glass>
-              )}
             </View>
           </View>
         )}

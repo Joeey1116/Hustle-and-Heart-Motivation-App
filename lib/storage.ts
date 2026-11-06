@@ -160,7 +160,7 @@ export async function setReminderTime(time: string): Promise<void> {
   await AsyncStorage.setItem(KEYS.REMINDER_TIME, time);
 }
 
-// ---------- User name (for the companion) ----------
+// ---------- User name ----------
 export async function getUserName(): Promise<string> {
   return (await AsyncStorage.getItem(KEYS.USER_NAME)) ?? '';
 }
@@ -190,24 +190,10 @@ export async function setThemeId(id: string): Promise<void> {
 }
 
 // ---------- Personalization (virtual home features) ----------
-export async function isCompanionEnabled(): Promise<boolean> {
-  const raw = await AsyncStorage.getItem(KEYS.COMPANION);
-  return raw !== '0'; // Default on
-}
-
-export async function setCompanionEnabled(on: boolean): Promise<void> {
-  await AsyncStorage.setItem(KEYS.COMPANION, on ? '1' : '0');
-}
-
-export async function isStreakBuddyEnabled(): Promise<boolean> {
-  const raw = await AsyncStorage.getItem(KEYS.BUDDY);
-  return raw !== '0'; // Default on
-}
-
-export async function setStreakBuddyEnabled(on: boolean): Promise<void> {
-  await AsyncStorage.setItem(KEYS.BUDDY, on ? '1' : '0');
-}
-
+// NOTE (2.0): the Haven AI companion + streak buddy were removed, so
+// isCompanionEnabled / setCompanionEnabled / isStreakBuddyEnabled /
+// setStreakBuddyEnabled were deleted with them. The stored flags
+// (KEYS.COMPANION / KEYS.BUDDY) are left in AsyncStorage untouched.
 export async function isRitualsEnabled(): Promise<boolean> {
   const raw = await AsyncStorage.getItem(KEYS.RITUALS);
   return raw !== '0'; // Default on

@@ -45,16 +45,15 @@ export function ImmersiveQuote({
     <View style={styles.container}>
       <LinearGradient colors={theme.bg} style={StyleSheet.absoluteFill} />
 
-      {/* Top: streak + hearts progress — both tappable */}
+      {/* Top: streak + hearts progress — streak badge is display-only
+          (the companion tab it used to open was removed in 2.0) */}
       <View style={[styles.topRow, { paddingTop: insets.top + 12 }]}>
-        <Pressable
-          onPress={() => router.push('/(tabs)/companion')}
+        <View
           style={styles.streakBadge}
-          hitSlop={10}
         >
           <Ionicons name="flame" size={16} color={theme.accent} />
           <Text style={[styles.streakText, { color: theme.text }]}>{streak}</Text>
-        </Pressable>
+        </View>
         <View style={styles.topRight}>
           <Pressable
             onPress={() => router.push('/(tabs)/favorites')}
@@ -70,10 +69,9 @@ export function ImmersiveQuote({
               />
             ))}
           </Pressable>
-          {/* Music lives on its own screen (/music) — build 18 moved it
-              out of Settings; this is its home-tab entry point. */}
+          {/* Music is a full tab (2.0) — this is its home-tab entry point. */}
           <Pressable
-            onPress={() => router.push('/music')}
+            onPress={() => router.push('/(tabs)/music')}
             style={styles.streakBadge}
             hitSlop={10}
             accessibilityLabel={t('today.openMusic')}

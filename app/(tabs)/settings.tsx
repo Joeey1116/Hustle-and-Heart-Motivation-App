@@ -21,8 +21,8 @@ import { Radius, Spacing, Type } from '../../lib/design';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../lib/themeContext';
 import type { ThemePalette } from '../../lib/themes';
-import { getPlan, isCompanionEnabled, isStreakBuddyEnabled, isRitualsEnabled,
-  setCompanionEnabled, setStreakBuddyEnabled, setRitualsEnabled,
+import { getPlan, isRitualsEnabled,
+  setRitualsEnabled,
   isNotifEnabled, setNotifEnabled, getUserName, setUserName,
   getChosenTracks, setChosenTracks, getThemeId, setThemeId } from '../../lib/storage';
 import { useStrings, setLanguage, planName } from '../../lib/i18n';
@@ -40,8 +40,6 @@ export default function Settings() {
   const styles = useMemo(() => createStyles(palette), [palette]);
   const { purchase, restore, subscriptions, productsLoading } = useHavenPlus();
   const [plan, setPlanState] = useState<'haven' | 'haven-plus'>('haven');
-  const [companion, setCompanion] = useState(true);
-  const [buddy, setBuddy] = useState(true);
   const [rituals, setRituals] = useState(true);
   const [notifOn, setNotifOn] = useState(false);
   const [userName, setUserNameState] = useState('');
@@ -52,8 +50,6 @@ export default function Settings() {
   const load = useCallback(async () => {
     const p = await getPlan();
     setPlanState(p === 'haven-plus' ? 'haven-plus' : 'haven');
-    setCompanion(await isCompanionEnabled());
-    setBuddy(await isStreakBuddyEnabled());
     setRituals(await isRitualsEnabled());
     setNotifOn(await isNotifEnabled());
     setUserNameState(await getUserName());
@@ -210,16 +206,6 @@ export default function Settings() {
     Linking.openURL('mailto:contact@beatrackfam.info?subject=Hustle%20%26%20Heart%20App');
   };
 
-  const toggleCompanion = async (v: boolean) => {
-    setCompanion(v);
-    await setCompanionEnabled(v);
-  };
-
-  const toggleBuddy = async (v: boolean) => {
-    setBuddy(v);
-    await setStreakBuddyEnabled(v);
-  };
-
   const toggleRituals = async (v: boolean) => {
     setRituals(v);
     await setRitualsEnabled(v);
@@ -308,23 +294,10 @@ export default function Settings() {
         </Pressable>
       </Glass>
 
-      {/* MAKE IT YOURS */}
+      {/* MAKE IT YOURS — the AI companion + streak buddy toggles were
+          removed in 2.0 with the Haven companion itself. */}
       <Text style={styles.section}>{t('settings.sections.makeItYours')}</Text>
       <Glass style={styles.group}>
-        <View style={styles.row}>
-          <View style={styles.rowInfo}>
-            <Text style={styles.rowTitle}>{t('settings.aiCompanion')}</Text>
-            <Text style={styles.rowDesc}>{t('settings.aiCompanionDesc')}</Text>
-          </View>
-          <Switch value={companion} onValueChange={toggleCompanion} />
-        </View>
-        <View style={styles.row}>
-          <View style={styles.rowInfo}>
-            <Text style={styles.rowTitle}>{t('settings.streakBuddy')}</Text>
-            <Text style={styles.rowDesc}>{t('settings.streakBuddyDesc')}</Text>
-          </View>
-          <Switch value={buddy} onValueChange={toggleBuddy} />
-        </View>
         <View style={styles.row}>
           <View style={styles.rowInfo}>
             <Text style={styles.rowTitle}>{t('settings.dailyRituals')}</Text>
