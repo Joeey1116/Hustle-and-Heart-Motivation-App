@@ -16,6 +16,8 @@ const KEYS = {
   PLAN: `${P}/plan`,
   LIFETIME: `${P}/lifetime_owned`,
   FREEZES: `${P}/streak_freezes`,
+  FREEZE_WELCOME: `${P}/freeze_welcome_granted`,
+  FREEZE_MILESTONE: `${P}/freeze_last_milestone`,
   THEME: `${P}/theme`,
   COMPANION: `${P}/companion_enabled`,
   BUDDY: `${P}/buddy_enabled`,
@@ -138,6 +140,51 @@ export async function useFreeze(): Promise<boolean> {
   if (count <= 0) return false;
   await AsyncStorage.setItem(KEYS.FREEZES, String(count - 1));
   return true;
+}
+
+// ---------- Free Streak Freezes (2.0 — earned in-app, no purchase) ----------
+/**
+ * Grants the free freezes a user earned. Call after recordOpen() with the
+ * current streak (callers show a one-time alert from the result). Two ways
+ * to earn, each firing exactly once per grant:
+ *  1. First freeze free: every user banks 1 free freeze once, ever.
+ *  2. One per 7-day streak milestone (7, 14, 21, ...): each milestone
+ *     banks 1 freeze, tracked so it fires exactly once — including
+ *     milestones a freeze saved the streak through.
+ * Idempotent: re-running with the same streak grants nothing new.
+ */
+export async function grantFreeFreezes(
+  streak: number
+): Promise<{ welcome: boolean; milestone: boolean; milestoneDays: number }> {
+  let welcome = false;
+  let milestone = false;
+  let milestoneDays = 0;
+  try {
+    // 1. First freeze free, exactly once.
+    if ((await AsyncStorage.getItem(KEYS.FREEZE_WELCOME)) !== '1') {
+      await addFreezes(1);
+      await AsyncStorage.setItem(KEYS.FREEZE_WELCOME, '1');
+      welcome = true;
+    }
+    // 2. One free freeze per 7-day streak milestone.
+    const reached = Math.floor(streak / 7) * 7;
+    if (reached >= 7) {
+      const lastGranted = parseInt((await AsyncStorage.getItem(KEYS.FREEZE_MILESTONE)) ?? '0', 10) || 0;
+      if (reached > lastGranted) {
+        // 1 per milestone passed — normally one; more on a catch-up for a
+        // streak that already passed milestones before this shipped.
+        const count = (reached - lastGranted) / 7;
+        await addFreezes(count);
+        await AsyncStorage.setItem(KEYS.FREEZE_MILESTONE, String(reached));
+        milestone = true;
+        milestoneDays = reached;
+      }
+    }
+  } catch {
+    // Best effort — a missed grant is non-fatal; the flags stay unset
+    // so it can fire again on the next open.
+  }
+  return { welcome, milestone, milestoneDays };
 }
 
 // ---------- Lifetime Haven Plus (2.0 non-consumable) ----------

@@ -13,6 +13,7 @@ import {
   getFavorites,
   getFreezeCount,
   getStreak,
+  grantFreeFreezes,
   recordOpen,
   toggleFavorite,
 } from '../../lib/storage';
@@ -39,6 +40,13 @@ export default function Today() {
     const q = await getQuoteOfTheDay(l, tr);
     setQuote(q);
     const { streak: s, freezeUsed } = await recordOpen();
+    // Free freezes earned in-app (first one free, one per 7-day streak
+    // milestone) — grantFreeFreezes is idempotent, so re-running load()
+    // on focus is safe. At most one alert per open: a freeze that saved
+    // the streak explains itself first, then a milestone, then the
+    // welcome freeze (React Native only shows the last alert if two
+    // are fired back to back).
+    const grants = await grantFreeFreezes(s);
     setStreak(s);
     setFreezes(await getFreezeCount());
     // A freeze was spent to save the streak after a missed day — tell
@@ -46,6 +54,13 @@ export default function Today() {
     // open, so re-running load() on focus won't repeat the alert).
     if (freezeUsed) {
       Alert.alert(t('today.freezeUsedTitle'), t('today.freezeUsedBody'));
+    } else if (grants.milestone) {
+      Alert.alert(
+        t('today.freezeMilestoneTitle'),
+        t('today.freezeMilestoneBody', { n: grants.milestoneDays })
+      );
+    } else if (grants.welcome) {
+      Alert.alert(t('today.freezeWelcomeTitle'), t('today.freezeWelcomeBody'));
     }
     if (q) {
       const favs = await getFavorites();
