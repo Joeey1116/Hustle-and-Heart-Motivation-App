@@ -187,6 +187,15 @@ const CLIP_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
 </dict>
@@ -404,11 +413,12 @@ const withAppClipXcodeProject = (config) =>
       INFOPLIST_FILE: `${CLIP_TARGET_NAME}/Info.plist`,
       CODE_SIGN_ENTITLEMENTS: `"${CLIP_TARGET_NAME}/${CLIP_TARGET_NAME}.entitlements"`,
       IPHONEOS_DEPLOYMENT_TARGET: `"${deploymentTarget}"`,
-      // App Clips are iPhone-only. '"1,2"' (universal) makes App Store
-      // Connect apply iPad rules to the clip bundle: missing 152x152 icon
-      // (90023), all-four iPad orientations (90474), iPad launch screen
-      // (90475). '"1"' kills all three.
-      TARGETED_DEVICE_FAMILY: '"1"',
+      // Xcode requires the clip's UIDeviceFamily to EQUAL the parent app's
+      // (Universal 1,2 here) — iPhone-only '"1"' fails ValidateEmbeddedBinary
+      // at archive (Rewards run 50, Nov 10 2026). A universal clip must meet
+      // ASC's iPad rules: full icon set, all-four iPad orientations, and an
+      // iPad launch screen — all three are in the clip's Info.plist/icon set.
+      TARGETED_DEVICE_FAMILY: '"1,2"',
       // The clip's own icon set (written by withAppClipFiles). Without
       // this, the clip bundle has no icon at all (90022/90713).
       ASSETCATALOG_COMPILER_APPICON_NAME: 'AppIcon',
