@@ -26,8 +26,8 @@ import { getPlan, isRitualsEnabled,
   isNotifEnabled, setNotifEnabled, getUserName, setUserName,
   getChosenTracks, setChosenTracks, getThemeId, setThemeId,
   getFreezeCount, isLifetimeOwned } from '../../lib/storage';
-import { useStrings, setLanguage, planName } from '../../lib/i18n';
-import { FREEZE_SKU, LIFETIME_SKU, useHavenPlus } from '../../lib/purchases';
+import { useStrings, setLanguage } from '../../lib/i18n';
+import { useHavenPlus } from '../../lib/purchases';
 
 const REVIEW_URL = 'https://apps.apple.com/app/id6821567537?action=write-review';
 
@@ -39,7 +39,7 @@ export default function Settings() {
   const { t, lang } = useStrings();
   const { theme, palette } = useTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
-  const { purchase, purchaseInApp, restore, subscriptions, products, productsLoading } = useHavenPlus();
+  const { productsLoading } = useHavenPlus();
   const [plan, setPlanState] = useState<'haven' | 'haven-plus'>('haven');
   const [isLifetime, setIsLifetime] = useState(false);
   const [freezes, setFreezes] = useState(0);
@@ -47,7 +47,6 @@ export default function Settings() {
   const [notifOn, setNotifOn] = useState(false);
   const [userName, setUserNameState] = useState('');
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const insets = useSafeAreaInsets();
 
   const load = useCallback(async () => {
@@ -72,24 +71,9 @@ export default function Settings() {
     }, [load])
   );
 
-  const openAppleSubs = () => {
-    Linking.openURL('https://apps.apple.com/account/subscriptions');
-  };
-
-  const openPlaySubs = () => {
-    Linking.openURL('https://play.google.com/store/account/subscriptions');
-  };
-
+  // Manage Subscription is a full screen now (build 31), not a popup.
   const manageSubscription = () => {
-    Alert.alert(
-      t('settings.manageAlertTitle'),
-      t('settings.manageAlertBody'),
-      [
-        { text: t('settings.manageApple'), onPress: openAppleSubs },
-        { text: t('settings.manageGoogle'), onPress: openPlaySubs },
-        { text: t('common.cancel'), style: 'cancel' },
-      ]
-    );
+    router.push('/settings/manage-subscription');
   };
 
   // Lifetime owners have no subscription to manage — just tell them so.
@@ -101,137 +85,17 @@ export default function Settings() {
     );
   };
 
-  // Live one-time products (2.0) — undefined until StoreKit returns them,
-  // so their buttons only appear once the store has the products.
-  const lifetimeProduct = products.find((p) => p.id === LIFETIME_SKU);
-  const freezeProduct = products.find((p) => p.id === FREEZE_SKU);
-
+  // Buy a Streak Freeze is a full screen now (build 31), not a popup.
+  // The screen loads the StoreKit product itself and shows its own
+  // loading state instead of the old "still loading" alert.
   const buyFreeze = () => {
-    // Never open a buy flow on a cold StoreKit fetch — same rule as the
-    // subscription paywall below.
-    if (productsLoading || !freezeProduct) {
-      Alert.alert(
-        t('settings.upgradeLoadingTitle'),
-        t('settings.loadingPlans'),
-        [{ text: t('common.ok'), style: 'cancel' }]
-      );
-      return;
-    }
-    Alert.alert(
-      t('settings.freezeBuyTitle'),
-      t('settings.freezeBuyBody'),
-      [
-        {
-          text: `${t('common.buy')} — ${freezeProduct.displayPrice}`,
-          onPress: () => handlePurchaseInApp(FREEZE_SKU),
-        },
-        { text: t('common.cancel'), style: 'cancel' },
-      ]
-    );
+    router.push('/settings/buy-freeze');
   };
 
+  // Haven Plus is a full screen now (build 31), not a popup: plan rows,
+  // Lifetime, and Restore all live on /settings/upgrade.
   const upgradeToPlus = () => {
-    // Never open the paywall on a cold StoreKit fetch — that was the
-    // "takes forever" sheet. Products are prefetched at app launch.
-    if (productsLoading || subscriptions.length === 0) {
-      Alert.alert(
-        t('settings.upgradeLoadingTitle'),
-        t('settings.loadingPlans'),
-        [{ text: t('common.ok'), style: 'cancel' }]
-      );
-      return;
-    }
-    Alert.alert(
-      t('settings.upgradeTitle'),
-      t('settings.upgradeBody'),
-      [
-        // Live StoreKit prices — never hardcoded, so they can't drift.
-        ...subscriptions.map((sub) => ({
-          text: `${planName(sub.id, sub.title)} ${sub.displayPrice}`,
-          onPress: () => handlePurchase(sub.id),
-        })),
-        // Lifetime (2.0): pay once, keep Haven Plus forever.
-        ...(lifetimeProduct
-          ? [
-              {
-                text: `${t('settings.lifetimeOption')} ${lifetimeProduct.displayPrice}`,
-                onPress: () => handlePurchaseInApp(LIFETIME_SKU),
-              },
-            ]
-          : []),
-        { text: t('settings.restorePurchase'), onPress: handleRestore },
-        { text: t('settings.notNow'), style: 'cancel' },
-      ]
-    );
-  };
-
-  const handlePurchase = async (sku: string) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      // purchase() resolves true ONLY on a verified transaction for this
-      // SKU (see lib/purchases.ts). Cancel/failure → false, no grant.
-      const ok = await purchase(sku);
-      if (ok) {
-        await load();
-        Alert.alert(
-          t('settings.welcomePlusTitle'),
-          t('settings.welcomePlusBody')
-        );
-      }
-      // Cancelled or failed → stay silent; the store sheet already said so.
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /**
-   * One-time purchase (Lifetime / Streak Freeze). Same verified-transaction
-   * rule as handlePurchase: purchaseInApp() resolves true ONLY on a real
-   * transaction for the SKU, and the grant happens in the purchase
-   * listener (lib/purchases.ts) — never here.
-   */
-  const handlePurchaseInApp = async (sku: string) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const ok = await purchaseInApp(sku);
-      if (ok) {
-        await load();
-        if (sku === LIFETIME_SKU) {
-          Alert.alert(
-            t('settings.welcomeLifetimeTitle'),
-            t('settings.welcomeLifetimeBody')
-          );
-        } else if (sku === FREEZE_SKU) {
-          Alert.alert(
-            t('settings.freezeBoughtTitle'),
-            t('settings.freezeBoughtBody')
-          );
-        }
-      }
-      // Cancelled or failed → stay silent; the store sheet already said so.
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRestore = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      // restore() grants haven-plus itself on success (lib/purchases.ts).
-      const ok = await restore();
-      Alert.alert(
-        ok ? t('settings.restoredTitle') : t('settings.noPurchaseTitle'),
-        ok
-          ? t('settings.restoredBody')
-          : t('settings.noPurchaseBody')
-      );
-      if (ok) load();
-    } finally {
-      setBusy(false);
-    }
+    router.push('/settings/upgrade');
   };
 
   const editName = () => {
@@ -270,19 +134,14 @@ export default function Settings() {
     });
   };
 
+  // Why We Built This is a full screen now (build 31), not a popup.
   const whyWeBuiltThis = () => {
-    Alert.alert(
-      t('settings.whyBuilt'),
-      t('settings.whyBuiltBody')
-    );
+    router.push('/settings/why');
   };
 
+  // Support Resources is a full screen now (build 31), not a popup.
   const supportResources = () => {
-    Alert.alert(
-      t('settings.supportResources'),
-      t('settings.supportBody'),
-      [{ text: t('common.close'), style: 'cancel' }]
-    );
+    router.push('/settings/support');
   };
 
   const contactUs = () => {
@@ -368,7 +227,7 @@ export default function Settings() {
           </Pressable>
         )}
         {plan !== 'haven-plus' && (
-          <Pressable onPress={handleRestore} style={styles.row}>
+          <Pressable onPress={() => router.push('/settings/upgrade')} style={styles.row}>
             <View style={styles.rowInfo}>
               <Text style={styles.rowTitle}>{t('settings.restorePurchase')}</Text>
               <Text style={styles.rowDesc}>{t('settings.restoreDesc')}</Text>

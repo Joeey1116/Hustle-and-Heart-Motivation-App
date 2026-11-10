@@ -174,7 +174,8 @@ function createStyles(p: ThemePalette) {
   return StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: p.background,
+    // No solid background here (build 31): the Screen gradient shows
+    // through, same fix as SignIn's black panel.
     padding: 20,
   },
   header: {

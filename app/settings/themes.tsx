@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -40,10 +40,9 @@ export default function ThemesScreen() {
   const pick = async (theme: Theme) => {
     const locked = !isPlus && theme.premium;
     if (locked) {
-      Alert.alert(t('settings.upgradeTitle'), t('themesScreen.lockedBody'), [
-        { text: t('settings.notNow'), style: 'cancel' },
-        { text: t('common.ok'), onPress: () => router.back() },
-      ]);
+      // Locked themes open the Haven Plus screen (build 31), not a
+      // popup — the user picks a plan or restores there.
+      router.push('/settings/upgrade');
       return;
     }
     // Optimistic + persisted inside the provider: the checkmark moves

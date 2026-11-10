@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
 import { Glass } from '../../components/Glass';
@@ -12,18 +12,12 @@ import {
   getGratitude,
   setGratitude,
   getMoodHistory,
-  saveMood,
   todayKey,
   getVentEntries,
-  saveVent,
-  deleteVent,
-  logBreatheSession,
   type MoodEntry,
   type VentEntry,
 } from '../../lib/storage';
-import { MoodCheckIn, emotionKey } from '../../components/MoodCheckIn';
-import { VentSpace } from '../../components/VentSpace';
-import { Breathe } from '../../components/Breathe';
+import { emotionKey } from '../../components/MoodCheckIn';
 
 export default function Journal() {
   const { t, lang, rtl } = useStrings();
@@ -32,10 +26,9 @@ export default function Journal() {
   const [text, setText] = useState('');
   const [savedTick, setSavedTick] = useState(0);
 
-  // Wellness tools (merged from the old Wellness tab, Oct 2026)
-  const [moodModal, setMoodModal] = useState(false);
-  const [ventModal, setVentModal] = useState(false);
-  const [breatheModal, setBreatheModal] = useState(false);
+  // Wellness tools (merged from the old Wellness tab, Oct 2026).
+  // Full screens now (build 31), not pageSheet popups — each tool
+  // loads its own data on its own route.
   const [moodHistory, setMoodHistory] = useState<MoodEntry[]>([]);
   const [ventEntries, setVentEntries] = useState<VentEntry[]>([]);
 
@@ -86,7 +79,7 @@ export default function Journal() {
               t('journal.moodDescCheckedIn'),
           })
         : t('journal.moodDescDefault'),
-      onPress: () => setMoodModal(true),
+      onPress: () => router.push('/journal/mood'),
     },
     {
       key: 'vent',
@@ -97,14 +90,14 @@ export default function Journal() {
           ? t('journal.ventDescOne')
           : t('journal.ventDescMany', { n: ventEntries.length })
         : t('journal.ventDescEmpty'),
-      onPress: () => setVentModal(true),
+      onPress: () => router.push('/journal/vent'),
     },
     {
       key: 'breathe',
       icon: 'leaf-outline' as const,
       title: t('journal.breatheTitle'),
       desc: t('journal.breatheDesc'),
-      onPress: () => setBreatheModal(true),
+      onPress: () => router.push('/journal/breathe'),
     },
   ];
 
@@ -147,45 +140,6 @@ export default function Journal() {
           </Pressable>
         ))}
       </ScrollView>
-
-      <Modal visible={moodModal} animationType="slide" presentationStyle="pageSheet">
-        <MoodCheckIn
-          initial={
-            todayMood
-              ? { valence: todayMood.valence, emotions: todayMood.emotions }
-              : null
-          }
-          onSave={async (valence, emotions) => {
-            await saveMood(valence, emotions);
-            await loadWellness();
-          }}
-          onClose={() => setMoodModal(false)}
-        />
-      </Modal>
-
-      <Modal visible={ventModal} animationType="slide" presentationStyle="pageSheet">
-        <VentSpace
-          entries={ventEntries}
-          onSave={async (v) => {
-            await saveVent(v);
-            loadWellness();
-          }}
-          onDelete={async (id) => {
-            await deleteVent(id);
-            loadWellness();
-          }}
-          onClose={() => setVentModal(false)}
-        />
-      </Modal>
-
-      <Modal visible={breatheModal} animationType="slide" presentationStyle="pageSheet">
-        <Breathe
-          onComplete={async (exerciseId, minutes) => {
-            await logBreatheSession(exerciseId, minutes);
-          }}
-          onClose={() => setBreatheModal(false)}
-        />
-      </Modal>
     </Screen>
   );
 }

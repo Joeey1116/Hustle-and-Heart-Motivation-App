@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
 import type { Session } from '@supabase/supabase-js';
 import { Screen } from '../../components/Screen';
 import { Glass } from '../../components/Glass';
@@ -17,8 +16,6 @@ import { Colors, Radius, Spacing, Type } from '../../lib/design';
 import type { ThemePalette } from '../../lib/themes';
 import { useTheme } from '../../lib/themeContext';
 import { isSupabaseConfigured, supabase } from '../../lib/supabase';
-import { clearAllLocalData } from '../../lib/storage';
-import { readImportedList, stopPlayback } from '../../lib/music';
 import { useStrings } from '../../lib/i18n';
 
 /**
@@ -80,70 +77,10 @@ export default function AccountScreen() {
     }
   };
 
-  const wipeDevice = async () => {
-    // Music: stop playback and delete imported audio files.
-    stopPlayback();
-    try {
-      const imported = await readImportedList();
-      for (const t of imported) {
-        await FileSystem.deleteAsync(t.uri, { idempotent: true });
-      }
-    } catch {
-      // Best effort — storage wipe below still proceeds.
-    }
-    await clearAllLocalData();
-  };
-
-  const deleteAccount = async () => {
-    if (!supabase || busy) return;
-    setBusy(true);
-    try {
-      const { error } = await supabase.functions.invoke('delete-account', {
-        method: 'POST',
-      });
-      if (error) throw error;
-      // Account is gone server-side. Wipe the device, drop the (now
-      // invalid) local session, and restart from the top.
-      await wipeDevice();
-      try {
-        await supabase.auth.signOut({ scope: 'local' });
-      } catch {
-        // Session is already invalid server-side — nothing to clean up.
-      }
-      setSession(null);
-      router.replace('/');
-    } catch (e: any) {
-      Alert.alert(
-        t('account.deleteFailTitle'),
-        e?.message || t('account.deleteFailBody')
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  // Delete Account is a full screen now (build 31), not a popup:
+  // two steps on /settings/delete-account, same double confirmation.
   const confirmDelete = () => {
-    Alert.alert(
-      t('account.confirm1Title'),
-      t('account.confirm1Body'),
-      [
-        { text: t('account.keepAccount'), style: 'cancel' },
-        {
-          text: t('common.continue'),
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              t('account.confirm2Title'),
-              t('account.confirm2Body'),
-              [
-                { text: t('common.cancel'), style: 'cancel' },
-                { text: t('account.deleteForever'), style: 'destructive', onPress: deleteAccount },
-              ]
-            );
-          },
-        },
-      ]
-    );
+    router.push('/settings/delete-account');
   };
 
   return (
@@ -203,15 +140,10 @@ export default function AccountScreen() {
             <View style={styles.dangerZone}>
               <Text style={styles.dangerTitle}>{t('account.dangerZone')}</Text>
               <Pressable
-                style={[styles.dangerBtn, busy && styles.disabled]}
+                style={styles.dangerBtn}
                 onPress={confirmDelete}
-                disabled={busy}
               >
-                {busy ? (
-                  <ActivityIndicator color={Colors.danger} />
-                ) : (
-                  <Text style={styles.dangerBtnText}>{t('account.deleteBtn')}</Text>
-                )}
+                <Text style={styles.dangerBtnText}>{t('account.deleteBtn')}</Text>
               </Pressable>
               <Text style={styles.dangerNote}>
                 {t('account.dangerNote')}

@@ -267,7 +267,9 @@ function createStyles(p: ThemePalette) {
   return StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: p.background,
+    // No solid background here (build 31): the Screen gradient shows
+    // through. A solid p.background painted a black panel over the gray
+    // gradient — the visible rectangle in the sign-in screenshot.
     padding: 24,
     alignItems: 'center',
     justifyContent: 'center',
