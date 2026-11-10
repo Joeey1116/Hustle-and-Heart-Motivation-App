@@ -75,6 +75,27 @@ const MAIN_PROFILE_NAME = 'BeaTrackFam Motivation App Store';
 const MAIN_TARGET_DIR = 'HustleHeartMotivation';
 const CLIP_ENTRY_FILE = 'clip/index.tsx';
 
+/** Contents.json for the clip's own AppIcon set: a single 1024x1024 icon,
+ *  exactly what Expo generates for the main app. Xcode derives the smaller
+ *  sizes at build time. Without its own icon set, App Store Connect
+ *  rejects the clip bundle (90022/90023/90713) — the clip is validated
+ *  as its own bundle. */
+const CLIP_APPICON_CONTENTS_JSON = JSON.stringify(
+  {
+    images: [
+      {
+        filename: 'App-Icon-1024x1024@1x.png',
+        idiom: 'universal',
+        platform: 'ios',
+        size: '1024x1024',
+      },
+    ],
+    info: { author: 'xcode', version: 1 },
+  },
+  null,
+  2
+);
+
 /** Fallback for the "Bundle React Native code and images" script if the main
  *  target's phase can't be read at prebuild time. Copied from the script
  *  Expo generates for this project (SDK 57); re-check on SDK upgrades. */
@@ -326,6 +347,19 @@ const withAppClipFiles = (config) =>
         CLIP_ENTITLEMENTS,
         'utf8'
       );
+      // The clip's own app icon (ASC validates the clip as its own bundle:
+      // no icon set -> 90022/90023/90713). Copy the main app icon into the
+      // clip's asset catalog; Xcode derives the smaller sizes at build
+      // time, exactly as for the main app's 1024-only set.
+      const iconSrc = config.icon
+        ? path.resolve(config.modRequest.projectRoot, config.icon)
+        : null;
+      const appiconDir = path.join(clipDir, 'Images.xcassets', 'AppIcon.appiconset');
+      fs.mkdirSync(appiconDir, { recursive: true });
+      if (iconSrc && fs.existsSync(iconSrc)) {
+        fs.copyFileSync(iconSrc, path.join(appiconDir, 'App-Icon-1024x1024@1x.png'));
+      }
+      fs.writeFileSync(path.join(appiconDir, 'Contents.json'), CLIP_APPICON_CONTENTS_JSON, 'utf8');
       return config;
     },
   ]);
@@ -370,7 +404,14 @@ const withAppClipXcodeProject = (config) =>
       INFOPLIST_FILE: `${CLIP_TARGET_NAME}/Info.plist`,
       CODE_SIGN_ENTITLEMENTS: `"${CLIP_TARGET_NAME}/${CLIP_TARGET_NAME}.entitlements"`,
       IPHONEOS_DEPLOYMENT_TARGET: `"${deploymentTarget}"`,
-      TARGETED_DEVICE_FAMILY: '"1,2"',
+      // App Clips are iPhone-only. '"1,2"' (universal) makes App Store
+      // Connect apply iPad rules to the clip bundle: missing 152x152 icon
+      // (90023), all-four iPad orientations (90474), iPad launch screen
+      // (90475). '"1"' kills all three.
+      TARGETED_DEVICE_FAMILY: '"1"',
+      // The clip's own icon set (written by withAppClipFiles). Without
+      // this, the clip bundle has no icon at all (90022/90713).
+      ASSETCATALOG_COMPILER_APPICON_NAME: 'AppIcon',
       SWIFT_VERSION: '5.0',
       SWIFT_OBJC_BRIDGING_HEADER: `"${MAIN_TARGET_DIR}/${MAIN_TARGET_DIR}-Bridging-Header.h"`,
       CLANG_ENABLE_MODULES: 'YES',
@@ -480,6 +521,26 @@ const withAppClipXcodeProject = (config) =>
       addSharedFileToPhase(xcodeProject, {
         fileRef: privacyRef,
         basename: 'PrivacyInfo.xcprivacy',
+        group: 'Resources',
+        targetUuid,
+        addToPhase: (f) => xcodeProject.addToPbxResourcesBuildPhase(f),
+      });
+    }
+
+    // The clip's own asset catalog (its app icon, written by
+    // withAppClipFiles) — into the clip's Resources phase so it lands in
+    // the clip bundle. addResourceFile can't be used here: it crashes in
+    // node-xcode's correctForResourcesPath when the project has no PBXGroup
+    // named "Resources" (Expo projects don't). So create the file ref with
+    // addFile and attach it to the phase the same way PrivacyInfo is.
+    const xcassetsFile = xcodeProject.addFile(
+      `${CLIP_TARGET_NAME}/Images.xcassets`,
+      groupUuid
+    );
+    if (xcassetsFile) {
+      addSharedFileToPhase(xcodeProject, {
+        fileRef: xcassetsFile.fileRef,
+        basename: xcassetsFile.basename,
         group: 'Resources',
         targetUuid,
         addToPhase: (f) => xcodeProject.addToPbxResourcesBuildPhase(f),
