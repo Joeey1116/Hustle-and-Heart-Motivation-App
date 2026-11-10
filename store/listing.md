@@ -40,6 +40,14 @@ No accounts. No ads. No noise. Just fuel.
 
 Download it and start your morning above it all.
 
+## What's New (2.0.0)
+
+• A new Music tab — your daily fuel, now with music
+• Lifetime Haven Plus — pay once, keep Haven Plus forever ($49.99)
+• Streak Freeze — miss a day without losing your streak ($0.99). Your first freeze is free, and you earn one free freeze every 7-day streak.
+
+Questions or concerns? Email us at contact@beatrackfam.info
+
 ## What's New (1.0.0)
 
 Welcome to Hustle & Heart Motivation! Your daily fuel is here:

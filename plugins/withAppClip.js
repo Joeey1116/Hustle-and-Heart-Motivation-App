@@ -9,29 +9,27 @@
  * Clip bundle ID: com.beatrackfaminc.motivation.HustleandHeartMotivation
  *   — the App ID ALREADY exists in the Developer portal (name: "Hustle And
  *     Heart Motivation App Clip"). Do NOT change this ID.
- * Clip JS entry: clip/index.tsx (a minimal Today-quote screen — no router,
- *   no tabs, no IAP/audio/notifications; it reuses lib/quotes + lib/i18n +
- *   lib/themes + the bundled quote libraries). The clip target shares the
- *   main target's AppDelegate.swift, so the same "main" module name is used;
- *   the clip's bundle phase builds clip/index.tsx into main.jsbundle.
+ * Clip UI: plugins/app-clip/ClipApp.swift + ContentView.swift — a tiny,
+ *   dependency-free SwiftUI app (today's quote + Get the Full App overlay).
+ *   It does NOT embed React Native: the first clip shared the main target's
+ *   AppDelegate and pods and came out 40 MB thinned, over Apple's 15 MB App
+ *   Clip limit (ITMS-90865, Nov 10 2026). A React Native clip cannot fit
+ *   under 15 MB — do NOT re-add RN to the clip target.
  *
  * What the plugin does at prebuild time:
  *   1. Writes ios/HustleHeartMotivationClip/Info.plist + .entitlements
- *      (parent-application-identifiers + on-demand-install-capable).
+ *      (parent-application-identifiers + on-demand-install-capable), the
+ *      AppIcon asset catalog, and the two SwiftUI source files.
  *   2. Adds the HustleHeartMotivationClip native target
  *      (product type com.apple.product-type.application.on-demand-install-capable)
- *      with Sources (shared AppDelegate.swift), Frameworks, Resources
- *      (shared PrivacyInfo.xcprivacy) and a "Bundle React Native code and
- *      images" phase identical to the main target's. The entry file is set
- *      per-target via the ENTRY_FILE build setting, so the shared bundle
- *      script builds clip/index.tsx for the clip and the normal
- *      expo-router entry for the main app.
+ *      with Sources (ClipApp.swift + ContentView.swift), Frameworks
+ *      (StoreKit, for the App Store overlay), and Resources (the asset
+ *      catalog + shared PrivacyInfo.xcprivacy). No bundle script, no JS
+ *      entry, no pods for the clip.
  *   3. Adds an "Embed App Clips" copy phase to the main target and makes the
  *      main target depend on the clip, so `xcodebuild archive` of the main
  *      scheme builds the clip and embeds it at AppClips/ inside the .app.
- *   4. Appends a matching target block to the Podfile so `pod install`
- *      links the same pods to the clip.
- *   5. Sets the Release PROVISIONING_PROFILE_SPECIFIER per target in the
+ *   4. Sets the Release PROVISIONING_PROFILE_SPECIFIER per target in the
  *      project (main -> "BeaTrackFam Motivation App Store", clip ->
  *      "BeaTrackFam Motivation App Clip"). This MUST be per-target in the
  *      project: the workflow used to pass PROVISIONING_PROFILE_SPECIFIER on
@@ -58,11 +56,10 @@
  * file with an `appclips` section, (c) an App Clip Experience configured in
  * App Store Connect under the parent app.
  *
- * SIZE: App Clips have a 15 MB limit. The clip's JS bundle is minimal, but
- * the clip target links the same native modules as the main app, so the
- * native binary is the thing to watch — only the macOS archive run can
- * measure it. If the archive exceeds 15 MB, the fix is a reduced Podfile
- * target for the clip (link only the modules the clip JS actually uses).
+ * SIZE: App Clips must be under 15 MB thinned. The first (React Native)
+ * clip was 40 MB and Apple rejected it (ITMS-90865, Nov 10 2026). This
+ * SwiftUI clip has no RN runtime, no pods, and no JS bundle — the same
+ * shape as the main app's and Rewards' clips, which are a few MB.
  */
 const { withXcodeProject, withDangerousMod, createRunOncePlugin } = require('@expo/config-plugins');
 const fs = require('fs');
@@ -73,7 +70,6 @@ const CLIP_BUNDLE_ID = 'com.beatrackfaminc.motivation.HustleandHeartMotivation';
 const CLIP_PROFILE_NAME = 'BeaTrackFam Motivation App Clip';
 const MAIN_PROFILE_NAME = 'BeaTrackFam Motivation App Store';
 const MAIN_TARGET_DIR = 'HustleHeartMotivation';
-const CLIP_ENTRY_FILE = 'clip/index.tsx';
 
 /** Contents.json for the clip's own AppIcon set: a single 1024x1024 icon,
  *  exactly what Expo generates for the main app. Xcode derives the smaller
@@ -95,53 +91,6 @@ const CLIP_APPICON_CONTENTS_JSON = JSON.stringify(
   null,
   2
 );
-
-/** Fallback for the "Bundle React Native code and images" script if the main
- *  target's phase can't be read at prebuild time. Copied from the script
- *  Expo generates for this project (SDK 57); re-check on SDK upgrades. */
-const FALLBACK_BUNDLE_SCRIPT = [
-  'export NODE_BINARY=node',
-  'if [[ -f "$PODS_ROOT/../.xcode.env" ]]; then',
-  '  source "$PODS_ROOT/../.xcode.env"',
-  'fi',
-  'if [[ -f "$PODS_ROOT/../.xcode.env.local" ]]; then',
-  '  source "$PODS_ROOT/../.xcode.env.local"',
-  'fi',
-  '',
-  '# The project root by default is one level up from the ios directory',
-  'export PROJECT_ROOT="$PROJECT_DIR"/..',
-  '',
-  'if [[ "$CONFIGURATION" = *Debug* ]]; then',
-  '  export SKIP_BUNDLING=1',
-  'fi',
-  'if [[ -z "$ENTRY_FILE" ]]; then',
-  '  # Set the entry JS file using the bundler\'s entry resolution.',
-  '  export ENTRY_FILE="$("$NODE_BINARY" -e "require(\'expo/scripts/resolveAppEntry\')" "$PROJECT_ROOT" ios absolute | tail -n 1)"',
-  'fi',
-  '',
-  'if [[ -z "$CLI_PATH" ]]; then',
-  '  # Use Expo CLI',
-  '  export CLI_PATH="$("$NODE_BINARY" --print "require.resolve(\'@expo/cli\', { paths: [require.resolve(\'expo/package.json\')] })")"',
-  'fi',
-  'if [[ -z "$BUNDLE_COMMAND" ]]; then',
-  '  # Default Expo CLI command for bundling',
-  '  export BUNDLE_COMMAND="export:embed"',
-  'fi',
-  '',
-  '# Source .xcode.env.updates if it exists to allow',
-  '# SKIP_BUNDLING to be unset if needed',
-  'if [[ -f "$PODS_ROOT/../.xcode.env.updates" ]]; then',
-  '  source "$PODS_ROOT/../.xcode.env.updates"',
-  'fi',
-  '# Source local changes to allow overrides',
-  '# if needed',
-  'if [[ -f "$PODS_ROOT/../.xcode.env.local" ]]; then',
-  '  source "$PODS_ROOT/../.xcode.env.local"',
-  'fi',
-  '',
-  ' `"$NODE_BINARY" --print "require(\'path\').dirname(require.resolve(\'react-native/package.json\')) + \'/scripts/react-native-xcode.sh\'"`',
-  '',
-].join('\n');
 
 const CLIP_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -216,48 +165,6 @@ const CLIP_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `;
 
-/** Podfile target block for the clip. Mirrors the main target's block
- *  (same autolinking commands, same use_react_native! args) but WITHOUT a
- *  post_install hook — the main target's post_install already runs
- *  react_native_post_install over every target. Re-check against the
- *  generated Podfile's main block if the Expo/RN autolinking commands
- *  change in a future SDK. */
-const PODFILE_CLIP_TARGET = `
-target "${CLIP_TARGET_NAME}" do
-  use_expo_modules!
-
-  if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
-    config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
-  else
-    config_command = [
-      'node',
-      '--no-warnings',
-      '--eval',
-      'require(\\'expo/bin/autolinking\\')',
-      'expo-modules-autolinking',
-      'react-native-config',
-      '--json',
-      '--platform',
-      'ios'
-    ]
-  end
-
-  config = use_native_modules!(config_command)
-
-  use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
-  use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
-
-  use_react_native!(
-    :path => config[:reactNativePath],
-    :hermes_enabled => podfile_properties['expo.jsEngine'] == nil || podfile_properties['expo.jsEngine'] == 'hermes',
-    # An absolute path to your application root.
-    :app_path => "#{Pod::Config.instance.installation_root}/..",
-    :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
-  )
-
-end
-`;
-
 // ---------------------------------------------------------------------------
 // Small pbxproj helpers (modeled on the expo-widgets plugin's approach).
 // ---------------------------------------------------------------------------
@@ -307,27 +214,6 @@ function getBuildPhaseByName(xcodeProject, targetUuid, isa, name) {
   return null;
 }
 
-/** Read the main target's "Bundle React Native code and images" phase so the
- *  clip's phase is an exact copy (the ENTRY_FILE build setting is what makes
- *  it bundle clip/index.tsx instead of the expo-router entry). */
-function getMainBundlePhase(xcodeProject, mainTargetUuid) {
-  const phase = getBuildPhaseByName(
-    xcodeProject,
-    mainTargetUuid,
-    'PBXShellScriptBuildPhase',
-    'Bundle React Native code and images'
-  );
-  if (!phase) return null;
-  const script = unquote(phase.shellScript);
-  if (!script.includes('react-native-xcode.sh')) return null;
-  return {
-    shellScript: script,
-    shellPath: unquote(phase.shellPath) || '/bin/sh',
-    inputPaths: Array.isArray(phase.inputPaths) ? phase.inputPaths : [],
-    outputPaths: Array.isArray(phase.outputPaths) ? phase.outputPaths : [],
-  };
-}
-
 function setReleaseProfileSpecifier(xcodeProject, targetUuid, profileName) {
   const target = xcodeProject.pbxNativeTargetSection()[targetUuid];
   if (!target) return;
@@ -369,22 +255,11 @@ const withAppClipFiles = (config) =>
         fs.copyFileSync(iconSrc, path.join(appiconDir, 'App-Icon-1024x1024@1x.png'));
       }
       fs.writeFileSync(path.join(appiconDir, 'Contents.json'), CLIP_APPICON_CONTENTS_JSON, 'utf8');
-      return config;
-    },
-  ]);
-
-// ---------------------------------------------------------------------------
-// Mod 2: append the clip target block to the Podfile.
-// ---------------------------------------------------------------------------
-const withAppClipPodfile = (config) =>
-  withDangerousMod(config, [
-    'ios',
-    async (config) => {
-      const podfilePath = path.join(config.modRequest.platformProjectRoot, 'Podfile');
-      let content = fs.readFileSync(podfilePath, 'utf8');
-      if (!content.includes(`target "${CLIP_TARGET_NAME}" do`)) {
-        content += PODFILE_CLIP_TARGET;
-        fs.writeFileSync(podfilePath, content, 'utf8');
+      // The clip's SwiftUI sources (plugins/app-clip/ templates — the
+      // source of truth; the generated copies are disposable).
+      const templatesDir = path.join(config.modRequest.projectRoot, 'plugins', 'app-clip');
+      for (const file of ['ClipApp.swift', 'ContentView.swift']) {
+        fs.copyFileSync(path.join(templatesDir, file), path.join(clipDir, file));
       }
       return config;
     },
@@ -423,18 +298,12 @@ const withAppClipXcodeProject = (config) =>
       // this, the clip bundle has no icon at all (90022/90713).
       ASSETCATALOG_COMPILER_APPICON_NAME: 'AppIcon',
       SWIFT_VERSION: '5.0',
-      SWIFT_OBJC_BRIDGING_HEADER: `"${MAIN_TARGET_DIR}/${MAIN_TARGET_DIR}-Bridging-Header.h"`,
       CLANG_ENABLE_MODULES: 'YES',
       MARKETING_VERSION: `"${marketingVersion}"`,
       CURRENT_PROJECT_VERSION: `"${currentProjectVersion}"`,
       VERSIONING_SYSTEM: '"apple-generic"',
       LD_RUNPATH_SEARCH_PATHS: ['"$(inherited)"', '"@executable_path/Frameworks"'],
-      OTHER_LDFLAGS: ['"$(inherited)"', '"-ObjC"', '"-lc++"'],
-      // The per-target JS entry: the shared bundle script only resolves the
-      // expo-router entry when ENTRY_FILE is unset, so this is what makes
-      // the clip bundle clip/index.tsx. Absolute via $(PROJECT_DIR) so the
-      // script's working directory can't mis-resolve it.
-      ENTRY_FILE: '"$(PROJECT_DIR)/../clip/index.tsx"',
+      OTHER_LDFLAGS: ['"$(inherited)"'],
     };
     const debugSettings = { ...commonSettings, SWIFT_OPTIMIZATION_LEVEL: '"-Onone"' };
     const releaseSettings = {
@@ -507,24 +376,27 @@ const withAppClipXcodeProject = (config) =>
     });
 
     // --- Build phases for the clip target ---
-    // Sources: the shared AppDelegate.swift (same file, its own build file).
+    // Sources: the clip's own SwiftUI files (written by withAppClipFiles).
+    // addSourceFile stores the full relative path, but the clip's PBXGroup
+    // already carries path = HustleHeartMotivationClip, so the full path
+    // resolves doubled — use bare basenames in this group (same bug as the
+    // main clip's sources, Nov 10 2026).
     xcodeProject.addBuildPhase([], 'PBXSourcesBuildPhase', 'Sources', targetUuid);
-    const appDelegateRef = findFileRef(xcodeProject, `${MAIN_TARGET_DIR}/AppDelegate.swift`);
-    if (!appDelegateRef) {
-      throw new Error(
-        `withAppClip: could not find ${MAIN_TARGET_DIR}/AppDelegate.swift in the Xcode project`
+    for (const swiftFile of ['ClipApp.swift', 'ContentView.swift']) {
+      const added = xcodeProject.addSourceFile(
+        `${CLIP_TARGET_NAME}/${swiftFile}`,
+        { target: targetUuid },
+        groupUuid
       );
+      if (added && added.fileRef) {
+        const ref = xcodeProject.pbxFileReferenceSection()[added.fileRef];
+        if (ref) ref.path = `"${swiftFile}"`;
+      }
     }
-    addSharedFileToPhase(xcodeProject, {
-      fileRef: appDelegateRef,
-      basename: 'AppDelegate.swift',
-      group: 'Sources',
-      targetUuid,
-      addToPhase: (f) => xcodeProject.addToPbxSourcesBuildPhase(f),
-    });
 
-    // Frameworks (empty — pods link via the xcconfig) and Resources.
+    // Frameworks: StoreKit only (App Store overlay in ContentView).
     xcodeProject.addBuildPhase([], 'PBXFrameworksBuildPhase', 'Frameworks', targetUuid);
+    xcodeProject.addFramework('StoreKit.framework', { target: targetUuid });
     xcodeProject.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', targetUuid);
     const privacyRef = findFileRef(xcodeProject, `${MAIN_TARGET_DIR}/PrivacyInfo.xcprivacy`);
     if (privacyRef) {
@@ -565,22 +437,6 @@ const withAppClipXcodeProject = (config) =>
       });
     }
 
-    // Bundle script: an exact copy of the main target's phase. ENTRY_FILE
-    // (set above as a build setting) is what swaps in the clip entry.
-    const mainBundle = getMainBundlePhase(xcodeProject, mainTargetUuid);
-    const bundleScript = mainBundle ? mainBundle.shellScript : FALLBACK_BUNDLE_SCRIPT;
-    xcodeProject.addBuildPhase([], 'PBXShellScriptBuildPhase', 'Bundle React Native code and images', targetUuid, {
-      shellPath: mainBundle ? mainBundle.shellPath : '/bin/sh',
-      shellScript: bundleScript,
-      inputPaths: mainBundle ? mainBundle.inputPaths : ['$(SRCROOT)/.xcode.env', '$(SRCROOT)/.xcode.env.local'],
-      outputPaths: mainBundle ? mainBundle.outputPaths : [],
-    });
-    const clipTarget = xcodeProject.pbxNativeTargetSection()[targetUuid];
-    const bundlePhaseEntry = clipTarget.buildPhases[clipTarget.buildPhases.length - 1];
-    const bundlePhase =
-      xcodeProject.hash.project.objects.PBXShellScriptBuildPhase[bundlePhaseEntry.value];
-    if (bundlePhase) bundlePhase.alwaysOutOfDate = 1;
-
     // --- Embed the clip in the main app ---
     if (!xcodeProject.pbxBuildFileSection()[productFile.uuid]) {
       xcodeProject.addToPbxBuildFileSection(productFile);
@@ -617,7 +473,6 @@ const withAppClipXcodeProject = (config) =>
 
 const withAppClip = (config) => {
   config = withAppClipFiles(config);
-  config = withAppClipPodfile(config);
   config = withAppClipXcodeProject(config);
   return config;
 };
