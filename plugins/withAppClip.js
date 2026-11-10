@@ -538,6 +538,14 @@ const withAppClipXcodeProject = (config) =>
       groupUuid
     );
     if (xcassetsFile) {
+      // addFile stores the full relative path, but the clip's PBXGroup
+      // already carries path = HustleHeartMotivationClip, so the full path
+      // resolves doubled (…/HustleHeartMotivationClip/HustleHeartMotivationClip/…)
+      // and actool can't find the AppIcon set (archive failed on this,
+      // Nov 10, 2026). The clip's other files use bare basenames in this
+      // group — match that.
+      const xcassetsRef = xcodeProject.pbxFileReferenceSection()[xcassetsFile.fileRef];
+      if (xcassetsRef) xcassetsRef.path = '"Images.xcassets"';
       addSharedFileToPhase(xcodeProject, {
         fileRef: xcassetsFile.fileRef,
         basename: xcassetsFile.basename,
