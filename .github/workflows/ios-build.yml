@@ -10,6 +10,24 @@ name: Build iOS IPA (Motivation)
 #   2. In Apple Developer / App Store Connect, create an API key and add
 #      these four repo secrets (Settings, Secrets and variables, Actions):
 #        ASC_API_KEY_ID, ASC_API_KEY_P8, ASC_API_ISSUER_ID, APPLE_TEAM_ID
+#   3. APP CLIP (added Nov 10, 2026 — ships with 2.0): the clip App ID
+#      ALREADY exists in the Developer portal:
+#        App ID name: "Hustle And Heart Motivation App Clip"
+#        Clip bundle ID: com.beatrackfaminc.motivation.HustleandHeartMotivation
+#      BUT the clip has NO provisioning profile yet — create it in the
+#      portal NOW with this EXACT name (character for character):
+#        "BeaTrackFam Motivation App Clip"
+#      App Store distribution, for the clip App ID above, and it MUST
+#      include the current Apple Distribution certificate (the Nov 6 one).
+#      The archive step and ExportOptions below reference that exact name;
+#      if the profile is ever renamed, update the name in
+#      plugins/withAppClip.js (CLIP_PROFILE_NAME) AND in the ExportOptions
+#      plist in this file to match. The build uses -allowProvisioningUpdates,
+#      so once the profile exists the archive fetches it automatically.
+#      NOTE: the clip has no invocation URL yet (no appclips: associated
+#      domain / AASA entry), so it can't launch from a link or QR code in
+#      production — it can be tested on-device via a TestFlight Local
+#      Experience. Wiring invocation is a follow-up, not a build blocker.
 #
 # Pattern copied from the proven workflow in the main BeaTrackFam app repo
 # (Joeey1116/BeaTrackFam-Mobile-App/.github/workflows/ios-build.yml).
@@ -139,10 +157,21 @@ jobs:
           echo "DIST_SIGN_IDENTITY=$IDENT_SHA" >> "$GITHUB_ENV"
           echo "Certificate imported."
 
-      - name: Archive the app (manual signing)
+      - name: Archive the app + App Clip (manual signing)
         # Step-level cap: a healthy archive finishes well under this. If the
         # signing phase ever hangs again, this fails fast instead of burning
         # the whole job timeout in macOS minutes.
+        #
+        # APP CLIP (Nov 10, 2026): archiving the main scheme also builds the
+        # HustleHeartMotivationClip target (added by plugins/withAppClip.js,
+        # embedded via the main target's "Embed App Clips" phase) and embeds
+        # it in the .app. PROVISIONING_PROFILE_SPECIFIER is deliberately NOT
+        # passed here: it is set per target in the generated project (main ->
+        # "BeaTrackFam Motivation App Store", clip -> "BeaTrackFam Motivation
+        # App Clip"), because a command-line value would force BOTH targets
+        # onto the main app's profile and fail clip signing. The main
+        # target's effective signing is unchanged (Manual, same profile,
+        # same certificate identity pinned below).
         timeout-minutes: 50
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
@@ -161,8 +190,7 @@ jobs:
             -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$DIST_SIGN_IDENTITY" \
-            PROVISIONING_PROFILE_SPECIFIER="BeaTrackFam Motivation App Store"
+            CODE_SIGN_IDENTITY="$DIST_SIGN_IDENTITY"
 
       - name: Export the IPA
         env:
@@ -193,6 +221,8 @@ jobs:
             <dict>
               <key>com.beatrackfaminc.motivation</key>
               <string>BeaTrackFam Motivation App Store</string>
+              <key>com.beatrackfaminc.motivation.HustleandHeartMotivation</key>
+              <string>BeaTrackFam Motivation App Clip</string>
             </dict>
           </dict>
           </plist>

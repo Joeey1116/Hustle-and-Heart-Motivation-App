@@ -103,7 +103,8 @@
           "recordAudioAndroid": false
         }
       ],
-      "./plugins/withNitroIapGradleProps"
+      "./plugins/withNitroIapGradleProps",
+      "./plugins/withAppClip"
     ],
     "scheme": [
       "hustleandheart",
