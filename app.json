@@ -7,7 +7,7 @@
       },
       "package": "com.beatrackfaminc.motivation",
       "permissions": [],
-      "versionCode": 16,
+      "versionCode": 17,
       "blockedPermissions": [
         "com.google.android.gms.permission.AD_ID"
       ]
