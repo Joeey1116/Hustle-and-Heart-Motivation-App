@@ -48,17 +48,14 @@
  * update CLIP_PROFILE_NAME below AND the ExportOptions.plist entry in
  * .github/workflows/ios-build.yml to match, character for character.
  *
- * NOT YET WIRED (follow-up, not a build blocker): the clip has no invocation
- * URL yet — no `appclips:` associated domain and no apple-app-site-association
- * entry on beatrackfam.info, so it can't be launched from a link/QR code in
- * production. It can still be tested on-device via a TestFlight Local
- * Experience. The `applinks:beatrackfam.info` associated domain IS now in the
- * clip entitlements (written by this plugin at prebuild); the clip App ID in
- * the portal still needs Associated Domains enabled for it to take effect.
- * Adding invocation needs: (a) the `appclips:beatrackfam.info`
- * associated-domain entitlement on the clip (and the App ID), (b) the AASA
- * file with an `appclips` section, (c) an App Clip Experience configured in
- * App Store Connect under the parent app.
+ * INVOCATION (Nov 10, 2026): the clip entitlements now carry BOTH
+ * `applinks:beatrackfam.info` and `appclips:beatrackfam.info` (the `appclips:`
+ * mode is what App Store Connect checks when creating an Advanced App Clip
+ * Experience — `applinks:` alone was rejected with "This URL is not contained
+ * in your app's associated domains"). The AASA file on beatrackfam.info
+ * already has the `appclips` section (all five clip IDs). Remaining step
+ * after a fresh build ships these entitlements: create the App Clip
+ * Experience in App Store Connect under the parent app.
  *
  * SIZE: App Clips must be under 15 MB thinned. The first (React Native)
  * clip was 40 MB and Apple rejected it (ITMS-90865, Nov 10 2026). This
