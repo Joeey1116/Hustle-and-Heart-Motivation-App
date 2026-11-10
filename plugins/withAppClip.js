@@ -168,6 +168,7 @@ const CLIP_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:beatrackfam.info</string>
+		<string>appclips:beatrackfam.info</string>
 	</array>
 </dict>
 </plist>
