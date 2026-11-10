@@ -24,9 +24,10 @@ import type { ThemePalette } from '../../lib/themes';
 import { getPlan, isRitualsEnabled,
   setRitualsEnabled,
   isNotifEnabled, setNotifEnabled, getUserName, setUserName,
-  getChosenTracks, setChosenTracks, getThemeId, setThemeId } from '../../lib/storage';
+  getChosenTracks, setChosenTracks, getThemeId, setThemeId,
+  getFreezeCount, isLifetimeOwned } from '../../lib/storage';
 import { useStrings, setLanguage, planName } from '../../lib/i18n';
-import { useHavenPlus } from '../../lib/purchases';
+import { FREEZE_SKU, LIFETIME_SKU, useHavenPlus } from '../../lib/purchases';
 
 const REVIEW_URL = 'https://apps.apple.com/app/id6821567537?action=write-review';
 
@@ -38,8 +39,10 @@ export default function Settings() {
   const { t, lang } = useStrings();
   const { theme, palette } = useTheme();
   const styles = useMemo(() => createStyles(palette), [palette]);
-  const { purchase, restore, subscriptions, productsLoading } = useHavenPlus();
+  const { purchase, purchaseInApp, restore, subscriptions, products, productsLoading } = useHavenPlus();
   const [plan, setPlanState] = useState<'haven' | 'haven-plus'>('haven');
+  const [isLifetime, setIsLifetime] = useState(false);
+  const [freezes, setFreezes] = useState(0);
   const [rituals, setRituals] = useState(true);
   const [notifOn, setNotifOn] = useState(false);
   const [userName, setUserNameState] = useState('');
@@ -50,6 +53,8 @@ export default function Settings() {
   const load = useCallback(async () => {
     const p = await getPlan();
     setPlanState(p === 'haven-plus' ? 'haven-plus' : 'haven');
+    setIsLifetime(await isLifetimeOwned());
+    setFreezes(await getFreezeCount());
     setRituals(await isRitualsEnabled());
     setNotifOn(await isNotifEnabled());
     setUserNameState(await getUserName());
@@ -87,6 +92,44 @@ export default function Settings() {
     );
   };
 
+  // Lifetime owners have no subscription to manage — just tell them so.
+  const showLifetimeInfo = () => {
+    Alert.alert(
+      t('settings.lifetimeInfoTitle'),
+      t('settings.lifetimeInfoBody'),
+      [{ text: t('common.ok'), style: 'cancel' }]
+    );
+  };
+
+  // Live one-time products (2.0) — undefined until StoreKit returns them,
+  // so their buttons only appear once the store has the products.
+  const lifetimeProduct = products.find((p) => p.id === LIFETIME_SKU);
+  const freezeProduct = products.find((p) => p.id === FREEZE_SKU);
+
+  const buyFreeze = () => {
+    // Never open a buy flow on a cold StoreKit fetch — same rule as the
+    // subscription paywall below.
+    if (productsLoading || !freezeProduct) {
+      Alert.alert(
+        t('settings.upgradeLoadingTitle'),
+        t('settings.loadingPlans'),
+        [{ text: t('common.ok'), style: 'cancel' }]
+      );
+      return;
+    }
+    Alert.alert(
+      t('settings.freezeBuyTitle'),
+      t('settings.freezeBuyBody'),
+      [
+        {
+          text: `${t('common.buy')} — ${freezeProduct.displayPrice}`,
+          onPress: () => handlePurchaseInApp(FREEZE_SKU),
+        },
+        { text: t('common.cancel'), style: 'cancel' },
+      ]
+    );
+  };
+
   const upgradeToPlus = () => {
     // Never open the paywall on a cold StoreKit fetch — that was the
     // "takes forever" sheet. Products are prefetched at app launch.
@@ -107,6 +150,15 @@ export default function Settings() {
           text: `${planName(sub.id, sub.title)} ${sub.displayPrice}`,
           onPress: () => handlePurchase(sub.id),
         })),
+        // Lifetime (2.0): pay once, keep Haven Plus forever.
+        ...(lifetimeProduct
+          ? [
+              {
+                text: `${t('settings.lifetimeOption')} ${lifetimeProduct.displayPrice}`,
+                onPress: () => handlePurchaseInApp(LIFETIME_SKU),
+              },
+            ]
+          : []),
         { text: t('settings.restorePurchase'), onPress: handleRestore },
         { text: t('settings.notNow'), style: 'cancel' },
       ]
@@ -126,6 +178,37 @@ export default function Settings() {
           t('settings.welcomePlusTitle'),
           t('settings.welcomePlusBody')
         );
+      }
+      // Cancelled or failed → stay silent; the store sheet already said so.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * One-time purchase (Lifetime / Streak Freeze). Same verified-transaction
+   * rule as handlePurchase: purchaseInApp() resolves true ONLY on a real
+   * transaction for the SKU, and the grant happens in the purchase
+   * listener (lib/purchases.ts) — never here.
+   */
+  const handlePurchaseInApp = async (sku: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const ok = await purchaseInApp(sku);
+      if (ok) {
+        await load();
+        if (sku === LIFETIME_SKU) {
+          Alert.alert(
+            t('settings.welcomeLifetimeTitle'),
+            t('settings.welcomeLifetimeBody')
+          );
+        } else if (sku === FREEZE_SKU) {
+          Alert.alert(
+            t('settings.freezeBoughtTitle'),
+            t('settings.freezeBoughtBody')
+          );
+        }
       }
       // Cancelled or failed → stay silent; the store sheet already said so.
     } finally {
@@ -233,7 +316,13 @@ export default function Settings() {
       <Glass style={styles.group}>
         <Pressable
           style={styles.row}
-          onPress={plan === 'haven-plus' ? manageSubscription : upgradeToPlus}
+          onPress={
+            plan === 'haven-plus'
+              ? isLifetime
+                ? showLifetimeInfo
+                : manageSubscription
+              : upgradeToPlus
+          }
         >
           <View style={styles.rowInfo}>
             <Text style={styles.rowTitle}>
@@ -241,7 +330,9 @@ export default function Settings() {
             </Text>
             <Text style={styles.rowDesc}>
               {plan === 'haven-plus'
-                ? t('settings.planPlusDesc')
+                ? isLifetime
+                  ? t('settings.planLifetimeDesc')
+                  : t('settings.planPlusDesc')
                 : productsLoading
                   ? t('settings.loadingPlans')
                   : t('settings.planFreeDesc')}
@@ -253,7 +344,21 @@ export default function Settings() {
             <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
           )}
         </Pressable>
-        {plan === 'haven-plus' && (
+        {/* Streak Freeze (2.0) — streaks live on the free plan too, so this
+            row shows for everyone. A banked freeze is spent automatically
+            the next time a day is missed (see recordOpen). */}
+        <Pressable onPress={buyFreeze} style={styles.row}>
+          <View style={styles.rowInfo}>
+            <Text style={styles.rowTitle}>{t('settings.freezeTitle')}</Text>
+            <Text style={styles.rowDesc}>
+              {freezes > 0
+                ? t('settings.freezeDescHas', { n: freezes })
+                : t('settings.freezeDescNone')}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
+        </Pressable>
+        {plan === 'haven-plus' && !isLifetime && (
           <Pressable onPress={manageSubscription} style={styles.row}>
             <View style={styles.rowInfo}>
               <Text style={styles.rowTitle}>{t('settings.manageSub')}</Text>

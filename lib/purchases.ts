@@ -6,11 +6,12 @@ import {
   purchaseErrorListener,
   getAvailablePurchases as queryAvailablePurchases,
   isUserCancelledError,
+  type Product,
   type ProductSubscription,
   type Purchase,
   type PurchaseError,
 } from 'react-native-iap';
-import { setPlan } from './storage';
+import { addFreezes, setLifetimeOwned, setPlan } from './storage';
 
 // Product IDs from App Store Connect (Joey set up 2026-10-12)
 // iOS: HAVENMONTH299, HAVEN3MONTH799, HAVEN6MONTH1499, HAVEN1YEAR1999
@@ -31,16 +32,39 @@ const ANDROID_SKUS = [
 
 export const SKUS = Platform.OS === 'ios' ? IOS_SKUS : ANDROID_SKUS;
 
+// One-time products (2.0) — Joey is creating these exact IDs in App Store
+// Connect: HAVENLIFETIME4999 (non-consumable, $49.99) and
+// HAVENSTREAKFREEZE099 (consumable, $0.99).
+const IOS_IAP_SKUS = ['HAVENLIFETIME4999', 'HAVENSTREAKFREEZE099'];
+
+// Android: same naming pattern as the subs; Joey to provide from Play
+// Console after uploading a build with billing.
+const ANDROID_IAP_SKUS = ['havenplus_lifetime', 'havenplus_streak_freeze'];
+
+export const IAP_SKUS = Platform.OS === 'ios' ? IOS_IAP_SKUS : ANDROID_IAP_SKUS;
+
+/** Lifetime Haven Plus (non-consumable) — Haven Plus forever, pay once. */
+export const LIFETIME_SKU =
+  Platform.OS === 'ios' ? 'HAVENLIFETIME4999' : 'havenplus_lifetime';
+
+/** Streak Freeze (consumable) — one freeze saves the streak for one missed day. */
+export const FREEZE_SKU =
+  Platform.OS === 'ios' ? 'HAVENSTREAKFREEZE099' : 'havenplus_streak_freeze';
+
 /** Friendly plan names per SKU (fallback when StoreKit gives no title). */
 export const SKU_NAMES: Record<string, string> = {
   HAVENMONTH299: 'Monthly',
   HAVEN3MONTH799: '3 Months',
   HAVEN6MONTH1499: '6 Months',
   HAVEN1YEAR1999: 'Yearly',
+  HAVENLIFETIME4999: 'Lifetime',
+  HAVENSTREAKFREEZE099: 'Streak Freeze',
   havenplus_monthly: 'Monthly',
   havenplus_3month: '3 Months',
   havenplus_6month: '6 Months',
   havenplus_yearly: 'Yearly',
+  havenplus_lifetime: 'Lifetime',
+  havenplus_streak_freeze: 'Streak Freeze',
 };
 
 /**
@@ -69,6 +93,7 @@ function settlePending(ok: boolean) {
 export function useHavenPlus() {
   const {
     connected,
+    products,
     subscriptions,
     requestPurchase,
     finishTransaction,
@@ -101,15 +126,25 @@ export function useHavenPlus() {
     const updateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
       try {
         const sku = purchase.productId;
-        const isOurs = SKUS.includes(sku);
+        const isFreeze = sku === FREEZE_SKU;
+        const isLifetime = sku === LIFETIME_SKU;
+        const isSub = SKUS.includes(sku);
+        const isOurs = isFreeze || isLifetime || isSub;
         if (isOurs) {
-          // Finish FIRST so StoreKit never redelivers, then grant.
+          // Finish FIRST so the store never redelivers, then grant.
+          // Consumables MUST finish as consumable or they can't be re-bought.
           try {
-            await finishTxRef?.({ purchase, isConsumable: false });
+            await finishTxRef?.({ purchase, isConsumable: isFreeze });
           } catch (e) {
             console.error('[purchases] finishTransaction failed:', e);
           }
-          await setPlan('haven-plus');
+          if (isFreeze) {
+            await addFreezes(1);
+          } else {
+            // Lifetime (non-consumable) and subscriptions both unlock Plus.
+            if (isLifetime) await setLifetimeOwned(true);
+            await setPlan('haven-plus');
+          }
         } else {
           console.warn('[purchases] transaction for unknown SKU:', sku);
         }
@@ -135,13 +170,15 @@ export function useHavenPlus() {
   }, []);
 
   // Prefetch StoreKit products once connected so the paywall never
-  // opens on a cold fetch (the old "takes forever" sheet).
+  // opens on a cold fetch (the old "takes forever" sheet). Subscriptions
+  // and one-time products (Lifetime + Streak Freeze) are fetched together.
   useEffect(() => {
     if (!connected) return;
     let cancelled = false;
     (async () => {
       try {
         await fetchProducts({ skus: SKUS, type: 'subs' });
+        await fetchProducts({ skus: IAP_SKUS, type: 'in-app' });
       } catch (e) {
         console.error('[purchases] fetchProducts failed:', e);
       } finally {
@@ -189,16 +226,57 @@ export function useHavenPlus() {
   );
 
   /**
+   * Starts a one-time purchase (Lifetime / Streak Freeze) and resolves TRUE
+   * only when a verified transaction for this SKU comes back through the
+   * purchase listener. Same event-based pattern as purchase() — the only
+   * difference is type: 'in-app' instead of 'subs'.
+   */
+  const purchaseInApp = useCallback(
+    async (sku: string): Promise<boolean> => {
+      if (pendingPurchase) {
+        console.warn('[purchases] purchase already in flight — ignoring');
+        return false;
+      }
+      setPurchasing(true);
+      try {
+        return await new Promise<boolean>((resolve) => {
+          pendingPurchase = { sku, resolve };
+          requestPurchase({
+            request: {
+              apple: { sku },
+              google: { skus: [sku] },
+            },
+            type: 'in-app',
+          }).catch((e) => {
+            // Synchronous launch failure (e.g. store not connected):
+            // no sheet was ever shown, so no listener event will come.
+            console.error('[purchases] requestPurchase threw:', e);
+            settlePending(false);
+          });
+        });
+      } finally {
+        if (mountedRef.current) setPurchasing(false);
+      }
+    },
+    [requestPurchase]
+  );
+
+  /**
    * Restores a previous purchase. Uses the query API directly (it returns
    * the purchase array) instead of the hook's availablePurchases STATE,
    * which would be stale immediately after the await — that race was the
    * old "restore never works" bug. Grants haven-plus on success.
+   * Lifetime (non-consumable) is restored here too; consumed Streak
+   * Freezes never reappear in available purchases, by design.
    */
   const restore = useCallback(async (): Promise<boolean> => {
     try {
       const purchases = await queryAvailablePurchases();
-      const ok = purchases.some((p) => SKUS.includes(p.productId));
+      const hasSub = purchases.some((p) => SKUS.includes(p.productId));
+      const hasLifetime = purchases.some((p) => p.productId === LIFETIME_SKU);
+      const ok = hasSub || hasLifetime;
       if (ok) {
+        if (hasLifetime) await setLifetimeOwned(true);
         await setPlan('haven-plus');
       }
       return ok;
@@ -215,13 +293,24 @@ export function useHavenPlus() {
     return priceA - priceB;
   });
 
+  // Sort one-time products by price (ascending): Streak Freeze → Lifetime
+  const sortedProducts = [...products].sort((a, b) => {
+    const priceA = typeof a.price === 'number' ? a.price : 0;
+    const priceB = typeof b.price === 'number' ? b.price : 0;
+    return priceA - priceB;
+  });
+
   return {
     subscriptions: sorted as ProductSubscription[],
+    /** One-time products (Lifetime + Streak Freeze), price ascending. */
+    products: sortedProducts as Product[],
     /** True until the first product fetch completes (success or fail). */
     productsLoading,
     /** True while a purchase sheet round-trip is in flight. */
     purchasing,
     purchase,
+    /** One-time purchase (Lifetime / Streak Freeze) — type 'in-app'. */
+    purchaseInApp,
     restore,
     finishTransaction,
   };

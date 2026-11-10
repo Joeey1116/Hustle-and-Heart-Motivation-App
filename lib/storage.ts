@@ -14,6 +14,8 @@ const KEYS = {
   GOALS: `${P}/goals`,
   REMINDER_TIME: `${P}/reminder_time`,
   PLAN: `${P}/plan`,
+  LIFETIME: `${P}/lifetime_owned`,
+  FREEZES: `${P}/streak_freezes`,
   THEME: `${P}/theme`,
   COMPANION: `${P}/companion_enabled`,
   BUDDY: `${P}/buddy_enabled`,
@@ -71,22 +73,37 @@ export async function setChosenTracks(tracks: TrackId[]): Promise<void> {
 }
 
 // ---------- Streak ----------
-/** Call on every app foreground. Returns the current streak. */
-export async function recordOpen(): Promise<number> {
+/**
+ * Call on every app foreground. Returns the current streak and whether a
+ * Streak Freeze stepped in to save it (only ever true on the first open
+ * after a missed day, so callers can celebrate it exactly once).
+ */
+export async function recordOpen(): Promise<{ streak: number; freezeUsed: boolean }> {
   const today = dayKey();
   try {
     const last = await AsyncStorage.getItem(KEYS.LAST_OPEN);
     let streak = parseInt((await AsyncStorage.getItem(KEYS.STREAK)) ?? '0', 10) || 0;
-    if (last === today) return streak;
+    if (last === today) return { streak, freezeUsed: false };
     const yesterday = dayKey(new Date(Date.now() - 86_400_000));
-    streak = last === yesterday ? streak + 1 : 1;
+    const dayBefore = dayKey(new Date(Date.now() - 2 * 86_400_000));
+    let freezeUsed = false;
+    if (last === yesterday) {
+      streak += 1;
+    } else if (last === dayBefore && (await useFreeze())) {
+      // Exactly one day missed and a freeze was banked: the freeze bridges
+      // the gap, so the streak continues instead of resetting to 1.
+      streak += 1;
+      freezeUsed = true;
+    } else {
+      streak = 1;
+    }
     await AsyncStorage.multiSet([
       [KEYS.LAST_OPEN, today],
       [KEYS.STREAK, String(streak)],
     ]);
-    return streak;
+    return { streak, freezeUsed };
   } catch {
-    return 0;
+    return { streak: 0, freezeUsed: false };
   }
 }
 
@@ -96,6 +113,41 @@ export async function getStreak(): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+// ---------- Streak freezes (2.0 consumable) ----------
+/** How many Streak Freezes are banked. Each one saves the streak once. */
+export async function getFreezeCount(): Promise<number> {
+  try {
+    return parseInt((await AsyncStorage.getItem(KEYS.FREEZES)) ?? '0', 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Bank n freezes (after a consumable purchase). Returns the new count. */
+export async function addFreezes(n: number): Promise<number> {
+  const next = (await getFreezeCount()) + n;
+  await AsyncStorage.setItem(KEYS.FREEZES, String(next));
+  return next;
+}
+
+/** Spend one banked freeze if any are available. True when one was used. */
+export async function useFreeze(): Promise<boolean> {
+  const count = await getFreezeCount();
+  if (count <= 0) return false;
+  await AsyncStorage.setItem(KEYS.FREEZES, String(count - 1));
+  return true;
+}
+
+// ---------- Lifetime Haven Plus (2.0 non-consumable) ----------
+/** True when this device owns Lifetime Haven Plus (one-time purchase). */
+export async function isLifetimeOwned(): Promise<boolean> {
+  return (await AsyncStorage.getItem(KEYS.LIFETIME)) === '1';
+}
+
+export async function setLifetimeOwned(owned: boolean): Promise<void> {
+  await AsyncStorage.setItem(KEYS.LIFETIME, owned ? '1' : '0');
 }
 
 // ---------- Gratitude journal ----------

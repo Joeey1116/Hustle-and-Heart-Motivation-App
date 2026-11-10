@@ -13,6 +13,8 @@ interface Props {
   quote: Quote;
   themeId: string;
   streak: number;
+  /** Banked Streak Freezes — shown when > 0 so the user knows they're protected. */
+  freezes: number;
   heartsToday: number;
   isFav: boolean;
   onFavorite: () => void;
@@ -28,6 +30,7 @@ export function ImmersiveQuote({
   quote,
   themeId,
   streak,
+  freezes,
   heartsToday,
   isFav,
   onFavorite,
@@ -48,11 +51,25 @@ export function ImmersiveQuote({
       {/* Top: streak + hearts progress — streak badge is display-only
           (the companion tab it used to open was removed in 2.0) */}
       <View style={[styles.topRow, { paddingTop: insets.top + 12 }]}>
-        <View
-          style={styles.streakBadge}
-        >
-          <Ionicons name="flame" size={16} color={theme.accent} />
-          <Text style={[styles.streakText, { color: theme.text }]}>{streak}</Text>
+        <View style={styles.topLeft}>
+          <View
+            style={styles.streakBadge}
+          >
+            <Ionicons name="flame" size={16} color={theme.accent} />
+            <Text style={[styles.streakText, { color: theme.text }]}>{streak}</Text>
+          </View>
+          {/* Banked Streak Freezes — display-only, like the streak badge.
+              Buying happens in Settings; a freeze is spent automatically
+              when a day is missed (see recordOpen in lib/storage.ts). */}
+          {freezes > 0 && (
+            <View
+              style={styles.streakBadge}
+              accessibilityLabel={t('today.freezeCount', { n: freezes })}
+            >
+              <Ionicons name="snow" size={16} color={theme.accent} />
+              <Text style={[styles.streakText, { color: theme.text }]}>{freezes}</Text>
+            </View>
+          )}
         </View>
         <View style={styles.topRight}>
           <Pressable
@@ -121,6 +138,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 16,
+  },
+  topLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   streakBadge: {
     flexDirection: 'row',

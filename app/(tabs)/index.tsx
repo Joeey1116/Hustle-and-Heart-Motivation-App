@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import type { ShotHandle } from '../../components/QuoteCard';
@@ -11,6 +11,7 @@ import { getQuoteOfTheDay, getRandomQuote, type Quote } from '../../lib/quotes';
 import {
   getChosenTracks,
   getFavorites,
+  getFreezeCount,
   getStreak,
   recordOpen,
   toggleFavorite,
@@ -19,13 +20,14 @@ import { refreshQuoteLiveActivity } from '../../lib/liveActivity';
 import { useTheme } from '../../lib/themeContext';
 
 export default function Today() {
-  const { lang } = useStrings();
+  const { t, lang } = useStrings();
   // Theme comes from the app-wide provider (build 20) — a selection in
   // Settings recolors this screen in the same render pass, no refetch.
   const { themeId, palette } = useTheme();
   const [tracks, setTracks] = useState<TrackId[]>([]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [streak, setStreak] = useState(0);
+  const [freezes, setFreezes] = useState(0);
   const [isFav, setIsFav] = useState(false);
   const [heartsToday, setHeartsToday] = useState(0);
   const shotRef = useRef<ShotHandle | null>(null);
@@ -36,7 +38,15 @@ export default function Today() {
     setTracks(tr);
     const q = await getQuoteOfTheDay(l, tr);
     setQuote(q);
-    setStreak(await recordOpen());
+    const { streak: s, freezeUsed } = await recordOpen();
+    setStreak(s);
+    setFreezes(await getFreezeCount());
+    // A freeze was spent to save the streak after a missed day — tell
+    // the user exactly once (recordOpen only reports it on that first
+    // open, so re-running load() on focus won't repeat the alert).
+    if (freezeUsed) {
+      Alert.alert(t('today.freezeUsedTitle'), t('today.freezeUsedBody'));
+    }
     if (q) {
       const favs = await getFavorites();
       setIsFav(favs.includes(q.id));
@@ -93,6 +103,7 @@ export default function Today() {
         quote={quote}
         themeId={themeId}
         streak={streak}
+        freezes={freezes}
         heartsToday={heartsToday}
         isFav={isFav}
         onFavorite={onFavorite}
