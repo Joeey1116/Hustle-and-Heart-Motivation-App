@@ -18,7 +18,8 @@
  *
  * What the plugin does at prebuild time:
  *   1. Writes ios/HustleHeartMotivationClip/Info.plist + .entitlements
- *      (parent-application-identifiers + on-demand-install-capable), the
+ *      (parent-application-identifiers + on-demand-install-capable +
+ *      associated-domains applinks:beatrackfam.info), the
  *      AppIcon asset catalog, and the two SwiftUI source files.
  *   2. Adds the HustleHeartMotivationClip native target
  *      (product type com.apple.product-type.application.on-demand-install-capable)
@@ -51,7 +52,10 @@
  * URL yet — no `appclips:` associated domain and no apple-app-site-association
  * entry on beatrackfam.info, so it can't be launched from a link/QR code in
  * production. It can still be tested on-device via a TestFlight Local
- * Experience. Adding invocation needs: (a) the `appclips:beatrackfam.info`
+ * Experience. The `applinks:beatrackfam.info` associated domain IS now in the
+ * clip entitlements (written by this plugin at prebuild); the clip App ID in
+ * the portal still needs Associated Domains enabled for it to take effect.
+ * Adding invocation needs: (a) the `appclips:beatrackfam.info`
  * associated-domain entitlement on the clip (and the App ID), (b) the AASA
  * file with an `appclips` section, (c) an App Clip Experience configured in
  * App Store Connect under the parent app.
@@ -160,6 +164,10 @@ const CLIP_ENTITLEMENTS = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>com.apple.developer.parent-application-identifiers</key>
 	<array>
 		<string>$(AppIdentifierPrefix)com.beatrackfaminc.motivation</string>
+	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:beatrackfam.info</string>
 	</array>
 </dict>
 </plist>
