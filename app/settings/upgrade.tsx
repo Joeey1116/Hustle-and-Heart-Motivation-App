@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/Screen';
@@ -14,8 +14,11 @@ import { planName, useStrings } from '../../lib/i18n';
  * Haven Plus — separate screen (not a popup), same chrome as the Your
  * Name screen: Back row, title, body, rows to tap.
  * A plan row starts that StoreKit purchase; success goes back to
- * Settings, where the plan row now shows Haven Plus. Restore shows its
- * result on this screen — no popup either way.
+ * Settings, where the plan row now shows Haven Plus.
+ * Restore reports its result in a popup (Alert), not an inline card
+ * — Joey, Nov 11, 2026: the inline "No Purchase Found" card read as
+ * part of the page. Lifetime sits in its own section below the plans,
+ * since a one-time purchase has no free trial.
  */
 export default function UpgradeScreen() {
   const { palette } = useTheme();
@@ -24,7 +27,6 @@ export default function UpgradeScreen() {
   const { purchase, purchaseInApp, restore, subscriptions, products, productsLoading } =
     useHavenPlus();
   const [busy, setBusy] = useState(false);
-  const [restoreResult, setRestoreResult] = useState<'ok' | 'none' | null>(null);
 
   const lifetimeProduct = products.find((p) => p.id === LIFETIME_SKU);
 
@@ -56,7 +58,13 @@ export default function UpgradeScreen() {
     setBusy(true);
     try {
       const ok = await restore();
-      setRestoreResult(ok ? 'ok' : 'none');
+      if (ok) {
+        Alert.alert(t('settings.restoredTitle'), t('settings.restoredBody'), [
+          { text: t('common.ok'), onPress: () => router.back() },
+        ]);
+      } else {
+        Alert.alert(t('settings.noPurchaseTitle'), t('settings.noPurchaseBody'));
+      }
     } finally {
       setBusy(false);
     }
@@ -92,19 +100,6 @@ export default function UpgradeScreen() {
                 <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
               </Pressable>
             ))}
-            {lifetimeProduct && (
-              <Pressable
-                style={[styles.row, busy && styles.disabled]}
-                onPress={buyLifetime}
-                disabled={busy}
-              >
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowTitle}>{t('settings.lifetimeOption')}</Text>
-                  <Text style={styles.rowDesc}>{lifetimeProduct.displayPrice}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
-              </Pressable>
-            )}
             <Pressable
               style={[styles.row, busy && styles.disabled]}
               onPress={doRestore}
@@ -119,22 +114,23 @@ export default function UpgradeScreen() {
           </Glass>
         )}
 
-        {restoreResult && (
-          <Glass style={styles.resultCard}>
-            <Text style={styles.resultTitle}>
-              {restoreResult === 'ok'
-                ? t('settings.restoredTitle')
-                : t('settings.noPurchaseTitle')}
-            </Text>
-            <Text style={styles.resultBody}>
-              {restoreResult === 'ok'
-                ? t('settings.restoredBody')
-                : t('settings.noPurchaseBody')}
-            </Text>
-            <Pressable onPress={() => router.back()} style={[styles.btn, styles.doneBtn]}>
-              <Text style={styles.doneText}>{t('common.ok')}</Text>
-            </Pressable>
-          </Glass>
+        {lifetimeProduct && (
+          <>
+            <Text style={styles.section}>{t('settings.sections.oneTime')}</Text>
+            <Glass style={styles.group}>
+              <Pressable
+                style={[styles.row, busy && styles.disabled]}
+                onPress={buyLifetime}
+                disabled={busy}
+              >
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowTitle}>{t('settings.lifetimeOption')}</Text>
+                  <Text style={styles.rowDesc}>{lifetimeProduct.displayPrice}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
+              </Pressable>
+            </Glass>
+          </>
         )}
 
         <Pressable onPress={() => router.back()} style={[styles.btn, styles.notNowBtn]}>
@@ -155,6 +151,13 @@ function createStyles(p: ThemePalette) {
     loading: { alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.lg },
     loadingText: { ...Type.body, color: p.textDim },
     group: { borderRadius: Radius.lg, overflow: 'hidden' },
+    section: {
+      ...Type.eyebrow,
+      color: p.textDim,
+      marginTop: Spacing.md,
+      marginBottom: Spacing.sm,
+      marginLeft: Spacing.xs,
+    },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -165,18 +168,7 @@ function createStyles(p: ThemePalette) {
     rowInfo: { flex: 1, gap: 2 },
     rowTitle: { color: p.text, fontSize: 17, fontWeight: '700' },
     rowDesc: { color: p.textDim, fontSize: 14 },
-    resultCard: {
-      borderRadius: Radius.lg,
-      padding: Spacing.md,
-      borderWidth: 1,
-      borderColor: p.border,
-      gap: Spacing.sm,
-    },
-    resultTitle: { ...Type.title, color: p.text },
-    resultBody: { ...Type.body, color: p.textDim },
     btn: { borderRadius: Radius.lg, paddingVertical: Spacing.md, alignItems: 'center' },
-    doneBtn: { backgroundColor: p.button, marginTop: Spacing.sm },
-    doneText: { color: p.buttonText, fontSize: 17, fontWeight: '700' },
     notNowBtn: { backgroundColor: p.surface, borderWidth: 1, borderColor: p.border },
     notNowText: { color: p.text, fontSize: 17, fontWeight: '600' },
     disabled: { opacity: 0.5 },
