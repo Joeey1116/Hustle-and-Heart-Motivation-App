@@ -310,6 +310,14 @@ export default function Settings() {
           </View>
           <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
         </Pressable>
+        {/* TOGETHER (3.0) — partner, shared challenges, encouragement inbox. */}
+        <Pressable style={styles.row} onPress={() => router.push('/social')}>
+          <View style={styles.rowInfo}>
+            <Text style={styles.rowTitle}>{t('settings.togetherRow')}</Text>
+            <Text style={styles.rowDesc}>{t('settings.togetherDesc')}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={palette.textDim} />
+        </Pressable>
       </Glass>
 
       {/* SUPPORT US */}

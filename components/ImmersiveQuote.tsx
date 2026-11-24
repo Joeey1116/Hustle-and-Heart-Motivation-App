@@ -20,6 +20,13 @@ interface Props {
   onFavorite: () => void;
   onShare: () => void;
   onNewQuote: () => void;
+  /** 3.0 — read the quote aloud. */
+  onListen?: () => void;
+  listening?: boolean;
+  /** 3.0 — one small action tied to today's quote, or null to hide. */
+  smallAction?: string | null;
+  /** 3.0 — share the streak as an image (tap the streak badge). */
+  onShareStreak?: () => void;
 }
 
 /**
@@ -36,6 +43,10 @@ export function ImmersiveQuote({
   onFavorite,
   onShare,
   onNewQuote,
+  onListen,
+  listening,
+  smallAction,
+  onShareStreak,
 }: Props) {
   const { t } = useStrings();
   const theme = getTheme(themeId);
@@ -48,16 +59,20 @@ export function ImmersiveQuote({
     <View style={styles.container}>
       <LinearGradient colors={theme.bg} style={StyleSheet.absoluteFill} />
 
-      {/* Top: streak + hearts progress — streak badge is display-only
-          (the companion tab it used to open was removed in 2.0) */}
+      {/* Top: streak + hearts progress — tapping the streak badge
+          shares it as an image (3.0); the hearts open Saved. */}
       <View style={[styles.topRow, { paddingTop: insets.top + 12 }]}>
         <View style={styles.topLeft}>
-          <View
+          {/* 3.0 — tapping the streak badge shares it as an image. */}
+          <Pressable
+            onPress={onShareStreak}
             style={styles.streakBadge}
+            hitSlop={10}
+            accessibilityLabel={t('today.shareStreak')}
           >
             <Ionicons name="flame" size={16} color={theme.accent} />
             <Text style={[styles.streakText, { color: theme.text }]}>{streak}</Text>
-          </View>
+          </Pressable>
           {/* Banked Streak Freezes — display-only, like the streak badge.
               Buying happens in Settings; a freeze is spent automatically
               when a day is missed (see recordOpen in lib/storage.ts). */}
@@ -72,10 +87,15 @@ export function ImmersiveQuote({
           )}
         </View>
         <View style={styles.topRight}>
+          {/* 3.0 fix: the hearts used to push /(tabs)/favorites, a route
+              that does not exist (favorites live in Browse as the Saved
+              segment) — tapping them showed an "Unmatched Route" screen.
+              They now open Browse directly on Saved. */}
           <Pressable
-            onPress={() => router.push('/(tabs)/favorites')}
+            onPress={() => router.push({ pathname: '/(tabs)/browse', params: { segment: 'saved' } })}
             style={styles.heartsRow}
             hitSlop={10}
+            accessibilityLabel={t('favorites.title')}
           >
             {[0, 1, 2, 3, 4].map((i) => (
               <Ionicons
@@ -105,6 +125,12 @@ export function ImmersiveQuote({
         </Text>
         <Text style={[styles.quote, { color: theme.text }]}>{quote.text}</Text>
         <Text style={[styles.brand, { color: theme.muted }]}>HUSTLE &amp; HEART</Text>
+        {/* 3.0 — one small action for today, tied to the quote's track. */}
+        {smallAction ? (
+          <Text style={[styles.smallAction, { color: theme.accent }]}>
+            {t('today.oneSmallThing')} {smallAction}
+          </Text>
+        ) : null}
       </View>
 
       {/* Bottom: actions — clear of the floating tab bar */}
@@ -123,6 +149,21 @@ export function ImmersiveQuote({
             color={isFav ? '#ff4d6d' : theme.text}
           />
         </Pressable>
+        {/* 3.0 — listen to the quote read aloud (expo-speech). */}
+        {onListen ? (
+          <Pressable
+            onPress={onListen}
+            style={styles.actionBtn}
+            hitSlop={12}
+            accessibilityLabel={listening ? t('today.stopListening') : t('today.listen')}
+          >
+            <Ionicons
+              name={listening ? 'stop' : 'volume-high'}
+              size={28}
+              color={listening ? theme.accent : theme.text}
+            />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -183,6 +224,14 @@ const styles = StyleSheet.create({
   brand: {
     ...Type.eyebrow,
     marginTop: 24,
+  },
+  smallAction: {
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 20,
+    paddingHorizontal: 8,
+    lineHeight: 22,
   },
   actions: {
     flexDirection: 'row',

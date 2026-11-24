@@ -14,6 +14,7 @@ import {
   saveImportedTracks,
   stopIfPlaying,
   useMusicPlayback,
+  useSleepTimer,
   type Track,
 } from '../lib/music';
 
@@ -48,6 +49,22 @@ export function MusicPlayer({ isHavenPlus }: Props) {
   const [genre, setGenre] = useState('All');
   const [tracks, setTracks] = useState<Track[]>(BUNDLED_TRACKS);
   const { playingId, togglePlay } = useMusicPlayback();
+  // 3.0 — sleep timer (module-level in lib/music.ts, survives tab switches).
+  const { endsAt, minutes: sleepMinutes, setSleepTimer } = useSleepTimer();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!endsAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [endsAt]);
+
+  const sleepRemainingMs = endsAt ? Math.max(endsAt - now, 0) : 0;
+  const sleepRemaining =
+    endsAt && sleepRemainingMs > 0
+      ? `${Math.floor(sleepRemainingMs / 60_000)}:${String(Math.floor((sleepRemainingMs % 60_000) / 1000)).padStart(2, '0')}`
+      : null;
+  const sleepActive = (minutes: number | null) =>
+    minutes === null ? endsAt === null : sleepMinutes === minutes;
 
   // Load imported tracks on mount.
   useEffect(() => {
@@ -158,6 +175,30 @@ export function MusicPlayer({ isHavenPlus }: Props) {
           </Pressable>
         ))}
       </ScrollView>
+
+      {/* 3.0 — sleep timer: stop playback after 15 / 30 / 60 minutes. */}
+      <View style={styles.sleepRow}>
+        <View style={styles.sleepLabel}>
+          <Ionicons name="moon-outline" size={16} color={palette.textDim} />
+          <Text style={styles.sleepTitle}>{t('sleep.title')}</Text>
+          {sleepRemaining ? (
+            <Text style={styles.sleepCountdown}>{t('sleep.stopsIn', { time: sleepRemaining })}</Text>
+          ) : null}
+        </View>
+        <View style={styles.sleepChips}>
+          {([null, 15, 30, 60] as const).map((m) => (
+            <Pressable
+              key={m === null ? 'off' : String(m)}
+              onPress={() => setSleepTimer(m)}
+              style={[styles.sleepChip, sleepActive(m) && styles.sleepChipActive]}
+            >
+              <Text style={[styles.sleepChipText, sleepActive(m) && styles.sleepChipTextActive]}>
+                {m === null ? t('sleep.off') : `${m}`}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
 
       <ScrollView style={styles.tracks} showsVerticalScrollIndicator={false}>
         {filtered.map((track) => {
@@ -276,5 +317,30 @@ function createStyles(p: ThemePalette) {
     textAlign: 'center',
     lineHeight: 16,
   },
+  // 3.0 — sleep timer.
+  sleepRow: {
+    backgroundColor: p.surface,
+    borderWidth: 1,
+    borderColor: p.border,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    gap: Spacing.sm,
+  },
+  sleepLabel: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  sleepTitle: { ...Type.title, color: p.text },
+  sleepCountdown: { ...Type.caption, color: p.textDim, flex: 1, textAlign: 'right' },
+  sleepChips: { flexDirection: 'row', gap: Spacing.sm },
+  sleepChip: {
+    borderWidth: 1,
+    borderColor: p.border,
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    minWidth: 52,
+    alignItems: 'center',
+  },
+  sleepChipActive: { backgroundColor: p.button, borderColor: p.button },
+  sleepChipText: { fontSize: 14, color: p.textDim, fontWeight: '700' },
+  sleepChipTextActive: { color: p.buttonText },
   });
 }

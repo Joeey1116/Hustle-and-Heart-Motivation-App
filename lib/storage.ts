@@ -25,6 +25,9 @@ const KEYS = {
   MOOD_HISTORY: `${P}/mood_history`,
   VENT_ENTRIES: `${P}/vent_entries`,
   BREATHE_SESSIONS: `${P}/breathe_sessions`,
+  QUOTE_HISTORY: `${P}/quote_history`,
+  PACK_PROGRESS: `${P}/pack_progress`,
+  FOCUS_SESSIONS: `${P}/focus_sessions`,
   USER_NAME: `${P}/user_name`,
 } as const;
 
@@ -388,4 +391,91 @@ export async function logBreatheSession(exerciseId: string, minutes: number): Pr
   const sessions = raw ? JSON.parse(raw) : [];
   sessions.push({ date: new Date().toISOString(), exerciseId, minutes });
   await AsyncStorage.setItem(KEYS.BREATHE_SESSIONS, JSON.stringify(sessions));
+}
+
+// ---------- Quote history (3.0) ----------
+// One entry per day: the daily quote the user actually saw. Kept to the
+// last 7 days so the History list stays short and relevant.
+export interface QuoteHistoryEntry {
+  date: string; // local YYYY-MM-DD
+  quoteId: string;
+}
+
+export async function recordDailyQuote(quoteId: string, date = dayKey()): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.QUOTE_HISTORY);
+    const history: QuoteHistoryEntry[] = raw ? JSON.parse(raw) : [];
+    const next = history.filter((h) => h.date !== date);
+    next.push({ date, quoteId });
+    // Keep only the last 7 entries, oldest first.
+    next.sort((a, b) => (a.date < b.date ? -1 : 1));
+    await AsyncStorage.setItem(
+      KEYS.QUOTE_HISTORY,
+      JSON.stringify(next.slice(-7))
+    );
+  } catch {
+    // History is a nice-to-have — never block the Today screen on it.
+  }
+}
+
+export async function getQuoteHistory(): Promise<QuoteHistoryEntry[]> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.QUOTE_HISTORY);
+    const history: QuoteHistoryEntry[] = raw ? JSON.parse(raw) : [];
+    // Newest first for display.
+    return [...history].sort((a, b) => (a.date < b.date ? 1 : -1));
+  } catch {
+    return [];
+  }
+}
+
+// ---------- Quote packs (3.0 — Haven Plus) ----------
+// Progress per pack: the day the user started, and which days (1-7)
+// they marked done. Stored as one JSON object keyed by pack id.
+export interface PackProgress {
+  startedOn: string; // local YYYY-MM-DD
+  doneDays: number[];
+}
+
+export async function getPackProgress(): Promise<Record<string, PackProgress>> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.PACK_PROGRESS);
+    return raw ? (JSON.parse(raw) as Record<string, PackProgress>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function startPack(packId: string): Promise<PackProgress> {
+  const all = await getPackProgress();
+  if (all[packId]) return all[packId];
+  const progress: PackProgress = { startedOn: dayKey(), doneDays: [] };
+  all[packId] = progress;
+  await AsyncStorage.setItem(KEYS.PACK_PROGRESS, JSON.stringify(all));
+  return progress;
+}
+
+export async function markPackDayDone(packId: string, day: number): Promise<PackProgress | null> {
+  const all = await getPackProgress();
+  const progress = all[packId];
+  if (!progress) return null;
+  if (!progress.doneDays.includes(day)) progress.doneDays.push(day);
+  all[packId] = progress;
+  await AsyncStorage.setItem(KEYS.PACK_PROGRESS, JSON.stringify(all));
+  return progress;
+}
+
+// ---------- Focus sessions (3.0) ----------
+export async function getFocusSessionCount(): Promise<number> {
+  try {
+    return parseInt((await AsyncStorage.getItem(KEYS.FOCUS_SESSIONS)) ?? '0', 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function logFocusSession(): Promise<number> {
+  const next = (await getFocusSessionCount()) + 1;
+  await AsyncStorage.setItem(KEYS.FOCUS_SESSIONS, String(next));
+  return next;
 }

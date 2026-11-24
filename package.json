@@ -25,6 +25,7 @@
     "expo-notifications": "~57.0.22",
     "expo-router": "~57.0.24",
     "expo-sharing": "~57.0.22",
+    "expo-speech": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "expo-tracking-transparency": "~57.0.2",
     "expo-widgets": "~57.0.23",
@@ -51,5 +52,5 @@
     "start": "expo start",
     "web": "expo start --web"
   },
-  "version": "2.0.0"
+  "version": "3.0"
 }

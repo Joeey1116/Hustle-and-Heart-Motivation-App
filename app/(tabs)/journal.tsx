@@ -99,6 +99,13 @@ export default function Journal() {
       desc: t('journal.breatheDesc'),
       onPress: () => router.push('/journal/breathe'),
     },
+    {
+      key: 'focus',
+      icon: 'timer-outline' as const,
+      title: t('journal.focusTitle'),
+      desc: t('journal.focusDesc'),
+      onPress: () => router.push('/journal/focus'),
+    },
   ];
 
   return (

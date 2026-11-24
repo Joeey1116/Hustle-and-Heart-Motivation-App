@@ -165,3 +165,63 @@ export function stopPlayback() {
 export function stopIfPlaying(id: string) {
   if (state.playingId === id) stopPlayback();
 }
+
+// ---------------------------------------------------------------------------
+// Sleep timer (3.0) — stops playback after N minutes. Lives at module
+// level like the player itself, so it survives leaving the Music screen:
+// the whole point is falling asleep to music from another tab.
+// ---------------------------------------------------------------------------
+
+interface SleepTimerState {
+  endsAt: number | null;
+  /** The duration the user picked, so the UI can highlight the active chip. */
+  minutes: number | null;
+}
+
+let sleepState: SleepTimerState = { endsAt: null, minutes: null };
+const sleepListeners = new Set<() => void>();
+let sleepTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function setSleepState(endsAt: number | null, minutes: number | null) {
+  sleepState = { endsAt, minutes };
+  for (const l of sleepListeners) l();
+}
+
+function subscribeSleep(cb: () => void): () => void {
+  sleepListeners.add(cb);
+  return () => {
+    sleepListeners.delete(cb);
+  };
+}
+
+function getSleepSnapshot(): SleepTimerState {
+  return sleepState;
+}
+
+/** Reactive view of the sleep timer, for any screen that shows music UI. */
+export function useSleepTimer(): {
+  endsAt: number | null;
+  minutes: number | null;
+  setSleepTimer: (minutes: number | null) => void;
+} {
+  const snap = useSyncExternalStore(subscribeSleep, getSleepSnapshot);
+  return { endsAt: snap.endsAt, minutes: snap.minutes, setSleepTimer };
+}
+
+/** Set the timer (minutes) or pass null to turn it off. */
+export function setSleepTimer(minutes: number | null): void {
+  if (sleepTimeout) {
+    clearTimeout(sleepTimeout);
+    sleepTimeout = null;
+  }
+  if (minutes === null || minutes <= 0) {
+    setSleepState(null, null);
+    return;
+  }
+  setSleepState(Date.now() + minutes * 60_000, minutes);
+  sleepTimeout = setTimeout(() => {
+    sleepTimeout = null;
+    setSleepState(null, null);
+    stopPlayback();
+  }, minutes * 60_000);
+}
