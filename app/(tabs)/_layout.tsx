@@ -39,6 +39,16 @@ import { useTheme } from '../../lib/themeContext';
  * the screen shows through around it, which is the look Joey asked
  * for. If the bar ever comes back, this is the first place to look.
  *
+ * FOLLOW-UP (Nov 24, 2026, build 35, on device): the bar was gone on
+ * Today but a frosted box still showed on the scrolled tabs (Browse,
+ * Music, Journal). Cause: Today uses the scroll-edge appearance
+ * (blur 'none' once the prop above is gone), but a scrolled tab uses
+ * the STANDARD appearance, whose blur defaults to the system material
+ * — a full-width frosted panel behind the capsule. Fix: blurEffect
+ * "none" + shadowColor "transparent" on the navigator, so the
+ * standard appearance has no blur and no shadow line either. The
+ * capsule itself keeps its own system glass; only the panel goes.
+ *
  * 5 tabs (consolidated Oct 15, 2026; revised in 2.0): Today, Browse
  * (Saved merged in), Music (promoted to a full tab in 2.0 — the
  * Haven AI companion tab was removed in 2.0), Journal (Wellness
@@ -50,6 +60,8 @@ export default function TabsLayout() {
   return (
     <NativeTabs
       backgroundColor="transparent"
+      blurEffect="none"
+      shadowColor="transparent"
       tintColor={palette.tabActive}
       iconColor={{ default: palette.tabInactive, selected: palette.tabActive }}
       labelStyle={{
