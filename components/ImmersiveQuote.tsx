@@ -140,7 +140,9 @@ export function ImmersiveQuote({
         </Pressable>
         <Pressable onPress={onNewQuote} style={styles.newQuoteBtn}>
           <Ionicons name="refresh" size={20} color="#000" />
-          <Text style={styles.newQuoteText}>{t('today.newQuote')}</Text>
+          <Text style={styles.newQuoteText} numberOfLines={1}>
+            {t('today.newQuote')}
+          </Text>
         </Pressable>
         <Pressable onPress={onFavorite} style={styles.actionBtn} hitSlop={12}>
           <Ionicons
@@ -237,14 +239,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 24,
+    // Nov 24, 2026 (3.0 build 34, on device): the row overflowed a 390pt
+    // screen — share cut at the left edge, speaker cut at the right —
+    // because 3x56 buttons + the ~170pt pill + 3x24 gaps + 2x20 padding
+    // totalled ~450pt. Narrowed so the whole row fits even a 360pt
+    // screen, and the pill may shrink (flexShrink) instead of pushing
+    // buttons off-screen on anything narrower.
+    gap: 10,
     paddingBottom: 32,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   actionBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -252,10 +260,11 @@ const styles = StyleSheet.create({
   newQuoteBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
     gap: 8,
     backgroundColor: '#fff',
-    paddingHorizontal: 28,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderRadius: 30,
   },
   newQuoteText: {

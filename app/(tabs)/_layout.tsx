@@ -31,6 +31,14 @@ import { useTheme } from '../../lib/themeContext';
  * bar's active state along with the rest of the app. Midnight's
  * tab colors (#FFFFFF / #666666) are exactly Rewards' hardcoded ones.
  *
+ * TAB BAR BACKGROUND (Nov 24, 2026, 3.0 build 34, on device): a solid
+ * bar showed behind the floating glass capsule — the native tab bar's
+ * opaque background, forced by `disableTransparentOnScrollEdge` on
+ * every trigger. Removed that prop everywhere and set the bar's
+ * background transparent, so only the Liquid Glass capsule shows and
+ * the screen shows through around it, which is the look Joey asked
+ * for. If the bar ever comes back, this is the first place to look.
+ *
  * 5 tabs (consolidated Oct 15, 2026; revised in 2.0): Today, Browse
  * (Saved merged in), Music (promoted to a full tab in 2.0 — the
  * Haven AI companion tab was removed in 2.0), Journal (Wellness
@@ -41,6 +49,7 @@ export default function TabsLayout() {
   const { palette } = useTheme();
   return (
     <NativeTabs
+      backgroundColor="transparent"
       tintColor={palette.tabActive}
       iconColor={{ default: palette.tabInactive, selected: palette.tabActive }}
       labelStyle={{
@@ -51,7 +60,6 @@ export default function TabsLayout() {
       <NativeTabs.Trigger
         name="index"
         contentStyle={{ backgroundColor: palette.background }}
-        disableTransparentOnScrollEdge
       >
         <NativeTabs.Trigger.Label>{t('tabs.today')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -62,7 +70,6 @@ export default function TabsLayout() {
       <NativeTabs.Trigger
         name="browse"
         contentStyle={{ backgroundColor: palette.background }}
-        disableTransparentOnScrollEdge
       >
         <NativeTabs.Trigger.Label>{t('tabs.browse')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -73,7 +80,6 @@ export default function TabsLayout() {
       <NativeTabs.Trigger
         name="music"
         contentStyle={{ backgroundColor: palette.background }}
-        disableTransparentOnScrollEdge
       >
         <NativeTabs.Trigger.Label>{t('tabs.music')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -84,7 +90,6 @@ export default function TabsLayout() {
       <NativeTabs.Trigger
         name="journal"
         contentStyle={{ backgroundColor: palette.background }}
-        disableTransparentOnScrollEdge
       >
         <NativeTabs.Trigger.Label>{t('tabs.journal')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
@@ -95,7 +100,6 @@ export default function TabsLayout() {
       <NativeTabs.Trigger
         name="settings"
         contentStyle={{ backgroundColor: palette.background }}
-        disableTransparentOnScrollEdge
       >
         <NativeTabs.Trigger.Label>{t('tabs.settings')}</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
