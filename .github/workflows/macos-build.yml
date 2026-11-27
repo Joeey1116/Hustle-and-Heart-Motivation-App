@@ -1,0 +1,322 @@
+name: Build macOS (Motivation)
+
+# MANUAL TRIGGER ONLY: this workflow never runs on its own — it only spends
+# macOS minutes when someone clicks "Run workflow" in the Actions tab.
+#
+# macOS TARGET (Nov 27, 2026): the Mac app is a react-native-macos target
+# (folder macos/, committed — Expo prebuild does NOT generate it) sharing
+# the app's JS via platform variants (app/(tabs)/_layout.macos.tsx sidebar
+# UI, lib/purchases.macos.ts store-disconnected Haven Plus,
+# lib/notifications.macos.ts no-op local notifications) and the
+# metro.config.js macOS resolver shim.
+#
+# ⚠️ PROFILE NAME — NOTE THE AMPERSAND:
+# The archive/export steps below expect a Mac App Store Connect
+# distribution profile named exactly:
+#
+#     Hustle & Heart Motivation
+#
+# That is the MAC profile's name, with "&". The iOS profile is spelled
+# "Hustle And Heart Motivation" — do NOT copy the iOS spelling here; if
+# the Mac profile is ever renamed in the portal, update MAC_PROFILE_NAME
+# below AND the PROVISIONING_PROFILE_SPECIFIER in
+# macos/above-all.xcodeproj/project.pbxproj together.
+#
+# ⚠️ VERSION MISMATCH RISK (known, accepted, same as the Flight Journal
+# pilot): the app runs react-native 0.86 (Expo SDK 57). react-native-
+# macos — a community fork — currently tops out at 0.83.0 (peer
+# react-native 0.83.10); there is NO react-native-macos release paired
+# with RN 0.86. The macOS target therefore builds the app's JS against
+# the react-native-macos 0.83 fork (metro maps 'react-native' →
+# 'react-native-macos' for the macos platform only; ios/android/web
+# keep using RN 0.86 untouched). JS bundling for macos is verified
+# locally, and the macOS codegen simulation (react-native-macos 0.83's
+# generate-codegen-artifacts.js, with the env-gated exclusions in
+# react-native.config.js) exits 0 — but the 0.83↔0.86 gap can still
+# bite at native-compile or runtime in ways only the first run of this
+# workflow can reveal.
+#
+# ⚠️ NO AUTO-BUMP IN THIS WORKFLOW (deliberate divergence from the
+# iOS/Android workflows): .github/scripts/bump-build-number.py bumps
+# app.json's iOS buildNumber + Android versionCode in sync and is
+# owned by those workflows (they commit the new number back). The Mac
+# build instead READS the current version/build from app.json and
+# stamps them into the Mac archive. Consequence: App Store Connect
+# rejects a second Mac upload with the SAME build number — before
+# re-running this workflow, advance the number (any iOS/Android
+# workflow run does it, or edit app.json's ios.buildNumber by hand).
+# There is intentionally no commit-back step here.
+#
+# HUMAN PREREQUISITES (Joey):
+#   1. macOS platform added to the existing App Store Connect record
+#      for com.beatrackfaminc.motivation.
+#   2. Mac App Store Connect distribution profile created with the
+#      exact name above (type "Mac", not Catalyst; App ID
+#      com.beatrackfaminc.motivation).
+#   3. Repo secrets already exist from the iOS workflow:
+#      ASC_API_KEY_ID, ASC_API_KEY_P8, ASC_API_ISSUER_ID,
+#      APPLE_TEAM_ID, IOS_DISTRIBUTION_P12, IOS_DISTRIBUTION_PASSWORD
+#      (the same Apple Distribution certificate signs Mac builds),
+#      plus EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY
+#      (baked into the JS bundle at archive time, same as iOS).
+#   4. NO App Clip on macOS — App Clips are iOS-only, so there is no
+#      Mac clip profile and nothing to embed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_testflight:
+        description: 'Upload the .pkg to App Store Connect (TestFlight / Mac App Store) after building'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  # ⚠️ Must match the Mac profile name in the Developer portal exactly
+  # (ampersand — NOT the iOS profile's "Hustle And Heart Motivation").
+  MAC_PROFILE_NAME: 'Hustle & Heart Motivation'
+
+jobs:
+  build-macos:
+    name: Archive Hustle & Heart Motivation macOS (Release)
+    runs-on: macos-26
+    timeout-minutes: 120
+    # Supabase config for optional sign-in / Together features — same
+    # job env as ios-build.yml; Metro inlines EXPO_PUBLIC_* into the
+    # JS bundle during the archive's bundle phase.
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read app version and build number from app.json
+        # Read-only (no bump — see the header comment). The Mac archive
+        # is stamped with these via MARKETING_VERSION /
+        # CURRENT_PROJECT_VERSION overrides at archive time.
+        run: |
+          echo "APP_VERSION=$(jq -r '.expo.version' app.json)" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$(jq -r '.expo.ios.buildNumber' app.json)" >> "$GITHUB_ENV"
+          echo "Mac build will be stamped version $APP_VERSION ($APP_BUILD from app.json)."
+
+      - name: Select the newest Xcode on the runner
+        run: |
+          XC="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$XC" ]; then XC="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          echo "Using $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      # --legacy-peer-deps is required in ALL THREE build workflows:
+      # react-native-macos@0.83.0 lives in the SHARED package.json (it
+      # is a devDependency of the one project all platforms build
+      # from) and declares a peer on react-native@0.83.10 while the
+      # app runs react-native@0.86, so a strict npm ci dies with
+      # ERESOLVE before anything installs — on iOS and Android too,
+      # not just here. The flag only skips peer enforcement: the
+      # lockfile pins every version, so the installed tree is
+      # identical with or without it. Keep the flag in
+      # ios-build.yml / android-build.yml in sync with this one for
+      # as long as react-native-macos is a project dependency.
+      - name: Install JS dependencies
+        run: npm ci --legacy-peer-deps
+        env:
+          EXPO_NO_TELEMETRY: '1'
+
+      - name: Install CocoaPods (macOS target)
+        # The macos/ project is committed (generated by
+        # react-native-macos-init, then adapted: bundle ID
+        # com.beatrackfaminc.motivation, Expo entry file + "main"
+        # module name). No expo prebuild step — prebuild has no macOS
+        # target and must not touch this folder.
+        working-directory: macos
+        run: pod install
+
+      - name: Write the App Store Connect API key
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          KEY_FILE="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          mkdir -p "$HOME/private_keys"
+          raw="$ASC_API_KEY_P8"
+          # Undo common paste accidents: surrounding quotes, CR characters,
+          # and literal \n sequences instead of real line breaks.
+          raw="${raw#\"}"; raw="${raw%\"}"
+          raw="${raw#\'}"; raw="${raw%\'}"
+          raw="$(printf '%s' "$raw" | tr -d '\r')"
+          if [[ "$raw" != *$'\n'* ]]; then
+            raw="$(printf '%s' "$raw" | sed 's/\\n/\n/g')"
+          fi
+          # If the BEGIN/END lines were lost, wrap the base64 body again.
+          if [[ "$raw" != *"BEGIN PRIVATE KEY"* ]]; then
+            body="$(printf '%s' "$raw" | tr -d '[:space:]')"
+            raw="$(printf -- '-----BEGIN PRIVATE KEY-----\n%s\n-----END PRIVATE KEY-----\n' "$(printf '%s' "$body" | fold -w 64)")"
+          fi
+          printf '%s\n' "$raw" > "$KEY_FILE"
+          if ! openssl pkey -in "$KEY_FILE" -noout 2>/dev/null; then
+            echo "::error::The ASC_API_KEY_P8 secret is not a valid .p8 key. Re-paste the full contents of the .p8 file from App Store Connect, including the BEGIN/END lines."
+            exit 1
+          fi
+
+      - name: Import distribution certificate
+        env:
+          P12_B64: ${{ secrets.IOS_DISTRIBUTION_P12 }}
+          P12_PW: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
+        run: |
+          printf '%s' "$P12_B64" | base64 -d > "$RUNNER_TEMP/dist.p12"
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          # Never auto-lock mid-build: a locked keychain makes codesign hang
+          # silently.
+          security set-keychain-settings -lut 7200 build.keychain
+          # Search ONLY this keychain so a generic identity name can't resolve
+          # ambiguously against stale certs in the login keychain.
+          security list-keychains -d user -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import "$RUNNER_TEMP/dist.p12" -k build.keychain -P "$P12_PW" -T /usr/bin/codesign -T /usr/bin/xcodebuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          # Pin the exact signing identity (SHA-1) instead of the generic
+          # "iPhone Distribution" or "Apple Distribution" name.
+          IDENT_SHA=$(security find-identity -v -p codesigning build.keychain | grep -m1 -E 'iPhone Distribution|Apple Distribution' | awk '{print $2}')
+          if [ -z "$IDENT_SHA" ]; then
+            echo "::error::No iPhone/Apple Distribution identity found in build.keychain after import."
+            security find-identity -v -p codesigning build.keychain || true
+            exit 1
+          fi
+          echo "Using signing identity $IDENT_SHA"
+          echo "DIST_SIGN_IDENTITY=$IDENT_SHA" >> "$GITHUB_ENV"
+          echo "Certificate imported."
+
+      - name: Archive the Mac app (manual signing)
+        # Step-level cap: a healthy archive finishes well under this.
+        # The provisioning profile is scoped IN THE PROJECT — the app
+        # target's Release configuration in
+        # macos/above-all.xcodeproj/project.pbxproj carries
+        # PROVISIONING_PROFILE_SPECIFIER = "Hustle & Heart Motivation"
+        # — and is deliberately NOT passed on this command line: a
+        # command-line PROVISIONING_PROFILE_SPECIFIER applies to
+        # EVERY target in the workspace, and the Flight Journal pilot
+        # (run #4, Nov 27, 2026) failed validation with "OpenAP_OpenIAP
+        # does not support provisioning profiles" because Swift
+        # Package Manager targets (react-native-iap's OpenIAP,
+        # integrated via CocoaPods) cannot carry provisioning
+        # profiles. DEVELOPMENT_TEAM, CODE_SIGN_STYLE and
+        # CODE_SIGN_IDENTITY stay global here — they are harmless on
+        # SPM targets; the pilot run's only error was the profile.
+        # If the portal profile is ever renamed, update
+        # MAC_PROFILE_NAME (used by the export step below) AND the
+        # project setting above together.
+        timeout-minutes: 50
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -workspace macos/above-all.xcworkspace \
+            -scheme above-all-macOS \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$GITHUB_WORKSPACE/build/Motivation-macOS.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$DIST_SIGN_IDENTITY" \
+            MARKETING_VERSION="$APP_VERSION" \
+            CURRENT_PROJECT_VERSION="$APP_BUILD"
+
+      - name: Export the .pkg
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$GITHUB_WORKSPACE/build/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.beatrackfaminc.motivation</key>
+              <string>${MAC_PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$GITHUB_WORKSPACE/build/Motivation-macOS.xcarchive" \
+            -exportPath "$GITHUB_WORKSPACE/build/pkg" \
+            -exportOptionsPlist "$GITHUB_WORKSPACE/build/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
+
+      - name: Upload the .pkg as a run artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: HustleHeart-macOS-${{ env.APP_VERSION }}-${{ env.APP_BUILD }}-pkg
+          path: build/pkg/*.pkg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the build to App Store Connect (TestFlight / Mac App Store)
+        if: inputs.upload_to_testflight
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          PKG="$(ls "$GITHUB_WORKSPACE"/build/pkg/*.pkg | head -1)"
+          echo "Uploading $PKG to App Store Connect..."
+          # altool looks for AuthKey_<id>.p8 in ~/.appstoreconnect/private_keys
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$HOME/.appstoreconnect/private_keys/"
+          ok=""
+          for attempt in 1 2 3; do
+            echo "Upload attempt $attempt of 3..."
+            if xcrun altool --upload-app --type macos --file "$PKG" \
+                 --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID"; then
+              ok=1; break
+            fi
+            sleep 20
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Upload failed after 3 attempts. The .pkg is still saved as a run artifact above — upload that file in Transporter instead."
+            exit 1
+          fi
+          echo "Uploaded. Apple processes the build (usually ~5-30 min), then it appears under the app's macOS platform in App Store Connect / TestFlight."
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$HOME/private_keys"

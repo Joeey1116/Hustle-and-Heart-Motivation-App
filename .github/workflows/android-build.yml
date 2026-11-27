@@ -88,8 +88,13 @@ jobs:
           node-version: '24'
           cache: npm
 
+      # --legacy-peer-deps: react-native-macos (devDependency, for the
+      # Mac target) peers at react-native@0.83.10 while the app runs
+      # react-native@0.86 — a strict npm ci dies with ERESOLVE. The
+      # flag only skips peer enforcement; the lockfile still pins every
+      # installed version. Same flag in all three build workflows.
       - name: Install JS dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Generate the native Android project (expo prebuild)
         env:
