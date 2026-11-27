@@ -16,7 +16,7 @@ name: Build iOS IPA (Motivation)
 #        Clip bundle ID: com.beatrackfaminc.motivation.HustleandHeartMotivation
 #      BUT the clip has NO provisioning profile yet — create it in the
 #      portal NOW with this EXACT name (character for character):
-#        "BeaTrackFam Motivation App Clip"
+#        "Hustle And Heart Motivation App Clip"
 #      App Store distribution, for the clip App ID above, and it MUST
 #      include the current Apple Distribution certificate (the Nov 6 one).
 #      The archive step and ExportOptions below reference that exact name;
@@ -180,7 +180,7 @@ jobs:
         # embedded via the main target's "Embed App Clips" phase) and embeds
         # it in the .app. PROVISIONING_PROFILE_SPECIFIER is deliberately NOT
         # passed here: it is set per target in the generated project (main ->
-        # "BeaTrackFam Motivation App Store", clip -> "BeaTrackFam Motivation
+        # "Hustle And Heart Motivation", clip -> "Hustle And Heart Motivation
         # App Clip"), because a command-line value would force BOTH targets
         # onto the main app's profile and fail clip signing. The main
         # target's effective signing is unchanged (Manual, same profile,
@@ -233,9 +233,9 @@ jobs:
             <key>provisioningProfiles</key>
             <dict>
               <key>com.beatrackfaminc.motivation</key>
-              <string>BeaTrackFam Motivation App Store</string>
+              <string>Hustle And Heart Motivation</string>
               <key>com.beatrackfaminc.motivation.HustleandHeartMotivation</key>
-              <string>BeaTrackFam Motivation App Clip</string>
+              <string>Hustle And Heart Motivation App Clip</string>
             </dict>
           </dict>
           </plist>

@@ -31,8 +31,8 @@
  *      main target depend on the clip, so `xcodebuild archive` of the main
  *      scheme builds the clip and embeds it at AppClips/ inside the .app.
  *   4. Sets the Release PROVISIONING_PROFILE_SPECIFIER per target in the
- *      project (main -> "BeaTrackFam Motivation App Store", clip ->
- *      "BeaTrackFam Motivation App Clip"). This MUST be per-target in the
+ *      project (main -> "Hustle And Heart Motivation", clip ->
+ *      "Hustle And Heart Motivation App Clip"). This MUST be per-target in the
  *      project: the workflow used to pass PROVISIONING_PROFILE_SPECIFIER on
  *      the xcodebuild command line, which would force the clip onto the main
  *      app's profile and fail signing. The workflow no longer passes it;
@@ -40,7 +40,7 @@
  *      style, same profile, same certificate identity).
  *
  * PORTAL PREREQUISITE (Joey): the clip App ID already exists, but the
- * provisioning profile "BeaTrackFam Motivation App Clip" (App Store
+ * provisioning profile "Hustle And Heart Motivation App Clip" (App Store
  * distribution, for the clip App ID above, including the Nov 6 Apple
  * Distribution certificate) must exist in the Developer portal before the
  * archive will sign. The workflow uses -allowProvisioningUpdates, so once
@@ -68,8 +68,8 @@ const path = require('path');
 
 const CLIP_TARGET_NAME = 'HustleHeartMotivationClip';
 const CLIP_BUNDLE_ID = 'com.beatrackfaminc.motivation.HustleandHeartMotivation';
-const CLIP_PROFILE_NAME = 'BeaTrackFam Motivation App Clip';
-const MAIN_PROFILE_NAME = 'BeaTrackFam Motivation App Store';
+const CLIP_PROFILE_NAME = 'Hustle And Heart Motivation App Clip';
+const MAIN_PROFILE_NAME = 'Hustle And Heart Motivation';
 const MAIN_TARGET_DIR = 'HustleHeartMotivation';
 
 /** Contents.json for the clip's own AppIcon set: a single 1024x1024 icon,
