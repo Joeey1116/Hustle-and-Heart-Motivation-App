@@ -23,6 +23,14 @@ name: Build macOS (Motivation)
 # macos/above-all.xcodeproj/project.pbxproj together (the export step
 # no longer names a profile — see its comment), or signing will fail.
 #
+# ⚠️ RUN #4 CAVEAT (Nov 28, 2026): the ASC API reports ZERO profiles
+# under the name above — its true stored name may differ invisibly
+# from the portal display. The "Install the Mac provisioning
+# profile" step below now selects by bundle ID and prints the
+# profile's true internal Name; if that name differs from the one
+# above, update MAC_PROFILE_NAME AND the specifier to the true name
+# (that is a rename to match reality, not a portal change).
+#
 # ⚠️ VERSION MISMATCH RISK (known, accepted, same as the Flight Journal
 # pilot): the app runs react-native 0.86 (Expo SDK 57). react-native-
 # macos — a community fork — currently tops out at 0.83.0 (peer
@@ -81,6 +89,9 @@ env:
   # PROVISIONING_PROFILE_SPECIFIER (in the macos project) must carry.
   # The export step no longer reads it (automatic signing, run #9 fix
   # pattern from the Flight Journal pilot).
+  # Run #4 caveat: the ASC API sees no profile under this name; the
+  # install step treats it as the EXPECTED name only and prints the
+  # true internal name it finds — update this value if they differ.
   MAC_PROFILE_NAME: 'Hustle & Heart Motivation'
 
 jobs:
@@ -210,47 +221,65 @@ jobs:
         # archive attempt failed with
         #   error: No profile for team matching
         #   'Hustle & Heart Motivation' found
-        # even though the profile exists in the portal (macOS /
-        # App Store / com.beatrackfaminc.motivation / Valid, exp
-        # 2027-11-07), was regenerated in place (Edit -> Save), and
-        # this repo + workflow are verified 1:1 with the green
-        # Flight Journal and Rewards Mac setups. The one remaining
-        # difference: this profile's name is the only one in the
-        # fleet containing "&", and the leading theory is that
-        # Xcode's -allowProvisioningUpdates by-name fetch — the
-        # mechanism the green apps rely on; they install nothing —
-        # fails to match that name, so the profile never lands on
-        # the runner and manual signing has nothing to find.
-        #
-        # This step removes the fetch from the equation: using the
-        # SAME App Store Connect API key the archive step below
-        # authenticates with, it downloads the EXISTING profile
-        # from the ASC API and installs the .mobileprovision into
-        # both directories Xcode searches
+        # even though the profile shows in the portal (macOS / App Store /
+        # com.beatrackfaminc.motivation / Valid, exp 2027-11-07), was
+        # regenerated in place (Edit -> Save), and this repo + workflow are
+        # verified 1:1 with the green Flight Journal and Rewards Mac
+        # setups. This step removes Xcode's -allowProvisioningUpdates
+        # by-name fetch from the equation: using the SAME App Store Connect
+        # API key the archive step below authenticates with, it downloads
+        # the EXISTING profile from the ASC API and installs the
+        # .mobileprovision into both directories Xcode searches
         # (~/Library/MobileDevice/Provisioning Profiles and
         # ~/Library/Developer/Xcode/UserData/Provisioning Profiles).
-        # NO new profile is created and the portal record is
-        # untouched. The archive step is unchanged: with the profile
-        # physically installed, the app target's in-project
-        # PROVISIONING_PROFILE_SPECIFIER resolves locally.
+        # NO new profile is created and the portal record is untouched.
         #
-        # Self-diagnosing by design: the step fails loudly unless
-        # the API returns EXACTLY ONE Mac profile with this name,
-        # cross-checks the decoded .mobileprovision's internal
-        # Name/UUID against the API record before installing, and
-        # logs the installed profile's name, UUID, platform and
-        # expiration. Implementation: an ES256 JWT built with
-        # python3 stdlib + the openssl CLI (openssl's DER signature
-        # is converted to the raw R||S form JWT requires, in pure
-        # python) — no pip installs. The filter[name] value MUST be
-        # percent-encoded (the name's "&" would otherwise split the
-        # query string); the script encodes it with
-        # urllib.parse.quote.
+        # WHAT RUN #4 PROVED (first version of this step, 459450c): both
+        # name queries executed cleanly and the API returned ZERO profiles
+        # named 'Hustle & Heart Motivation' — name+MAC_APP_STORE and
+        # name-only alike. From the API's point of view that exact name
+        # does not exist, which would ALSO explain runs #1-#3: Xcode's
+        # by-name lookup misses for the same reason. Leading theory: the
+        # profile's true stored name differs from the portal display by
+        # some character nobody can see (an invisible or look-alike
+        # character in the stored name).
+        #
+        # So the lookup is now NAME-INDEPENDENT. PRIMARY: resolve the
+        # bundle ID resource for com.beatrackfaminc.motivation, list the
+        # profiles attached to it, and select the one with platform MAC_OS
+        # + profileType MAC_APP_STORE + profileState ACTIVE. The old name
+        # queries remain only as a secondary path. If BOTH paths find
+        # nothing, the step dumps EVERY profile this API key can see
+        # (name/platform/type/state, paginated) into the log before
+        # failing, which settles whether the profile exists from the API
+        # side at all.
+        #
+        # Whatever is selected, the step prints the downloaded
+        # .mobileprovision's INTERNAL Name and UUID in a banner — the
+        # internal Name is the ground truth Xcode matches
+        # PROVISIONING_PROFILE_SPECIFIER against. If it differs from
+        # MAC_PROFILE_NAME, the step also prints both names' codepoints
+        # (so the exact differing character is visible) and patches the
+        # CHECKED-OUT project.pbxproj specifier for this run only, so the
+        # archive can proceed; the repo must then be updated to the true
+        # name (MAC_PROFILE_NAME + the specifier) to match.
+        #
+        # Safeguards kept: selection fails loudly unless EXACTLY ONE
+        # profile matches the criteria, the .mobileprovision's internal
+        # UUID must equal the API record id and its internal Name must
+        # equal the API record name before anything is installed, and API
+        # errors fail with the HTTP status + response body.
+        # Implementation: an ES256 JWT built with python3 stdlib + the
+        # openssl CLI (openssl's DER signature is converted to the raw
+        # R||S form JWT requires, in pure python) — no pip installs.
+        # Query values are percent-encoded with urllib.parse.quote (the
+        # name's "&" would otherwise split the query string).
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          APP_BUNDLE_ID: 'com.beatrackfaminc.motivation'
         run: |
-          python3 - "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$MAC_PROFILE_NAME" <<'PYEOF'
+          python3 - "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$MAC_PROFILE_NAME" "$APP_BUNDLE_ID" <<'PYEOF'
           import base64
           import json
           import os
@@ -264,17 +293,22 @@ jobs:
           import urllib.parse
           import urllib.request
 
-          # Args: <authkey .p8 path> <ASC key id> <ASC issuer id> <exact profile name>
+          # Args: <authkey .p8 path> <ASC key id> <ASC issuer id> <expected profile name> <app bundle identifier>
           KEY_PATH = sys.argv[1]
           KEY_ID = sys.argv[2]
           ISSUER_ID = sys.argv[3]
           PROFILE_NAME = sys.argv[4]
+          BUNDLE_IDENTIFIER = sys.argv[5]
 
-          API_BASE = "https://api.appstoreconnect.apple.com/v1/profiles"
+          ASC_BASE = "https://api.appstoreconnect.apple.com/v1"
+          PROFILES_URL = ASC_BASE + "/profiles"
+          BUNDLE_IDS_URL = ASC_BASE + "/bundleIds"
           PROFILE_DIRS = [
               os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles"),
               os.path.expanduser("~/Library/Developer/Xcode/UserData/Provisioning Profiles"),
           ]
+          PBXPROJ_PATH = os.path.join(os.environ.get("GITHUB_WORKSPACE", "."),
+                                      "macos", "above-all.xcodeproj", "project.pbxproj")
 
 
           def fail(msg):
@@ -343,13 +377,13 @@ jobs:
               return signing_input + "." + b64url(der_to_raw(der))
 
 
-          def profiles_url(params):
+          def query_url(base, params):
               # Keys stay literal (filter[name]= is the API's canonical form); values
               # are percent-encoded with safe="" so the "&" in the profile name becomes
               # %26 instead of splitting the query into a bogus extra parameter.
               qs = "&".join("%s=%s" % (k, urllib.parse.quote(v, safe=""))
                             for k, v in params)
-              return API_BASE + "?" + qs
+              return base + "?" + qs
 
 
           def api_get(url, token):
@@ -369,16 +403,67 @@ jobs:
                   fail("Could not reach the App Store Connect API: %s" % (e.reason,))
 
 
+          def api_get_all(first_url, token):
+              # Follow links.next until exhausted; ASC paginates list endpoints.
+              entries = []
+              url = first_url
+              while url:
+                  page = api_get(url, token)
+                  entries.extend(page.get("data", []))
+                  url = (page.get("links") or {}).get("next")
+              return entries
+
+
           def brief(entry):
               a = entry.get("attributes", {})
-              return "id=%s name=%r platform=%s profileType=%s" % (
+              return "id=%s name=%r platform=%s profileType=%s profileState=%s" % (
                   entry.get("id"), a.get("name"), a.get("platform"),
-                  a.get("profileType"))
+                  a.get("profileType"), a.get("profileState"))
 
 
-          def select_profile(token):
-              url = profiles_url([("filter[name]", PROFILE_NAME),
-                                  ("filter[profileType]", "MAC_APP_STORE")])
+          def is_mac_store_active(entry):
+              a = entry.get("attributes", {})
+              return (a.get("platform") == "MAC_OS"
+                      and a.get("profileType") == "MAC_APP_STORE"
+                      and a.get("profileState") == "ACTIVE")
+
+
+          def select_by_bundle_id(token):
+              # PRIMARY, name-independent path: resolve the app's bundle ID resource,
+              # list every profile attached to it, and pick the Mac App Store one.
+              # Run #4 proved the API returns ZERO profiles for the name we believed
+              # the Mac profile had, so the name cannot be trusted as a lookup key.
+              url = query_url(BUNDLE_IDS_URL, [("filter[identifier]", BUNDLE_IDENTIFIER)])
+              bids = api_get(url, token).get("data", [])
+              if len(bids) != 1:
+                  print("Bundle-ID lookup for %r returned %d bundle ID resource(s); "
+                        "skipping the bundle-ID path."
+                        % (BUNDLE_IDENTIFIER, len(bids)))
+                  return None
+              bid = bids[0].get("id")
+              print("Bundle ID resource for %s: %s" % (BUNDLE_IDENTIFIER, bid))
+              url = query_url(PROFILES_URL, [("filter[bundleId]", bid),
+                                              ("include", "bundleId"),
+                                              ("limit", "200")])
+              entries = api_get_all(url, token)
+              matches = [e for e in entries if is_mac_store_active(e)]
+              print("Bundle-ID path: %d profile(s) attached to this bundle ID, %d "
+                    "matching platform=MAC_OS + profileType=MAC_APP_STORE + "
+                    "profileState=ACTIVE." % (len(entries), len(matches)))
+              if len(matches) > 1:
+                  fail("bundle-ID selection is ambiguous: %d profiles match. Matches: %s"
+                       % (len(matches), "; ".join(brief(m) for m in matches)))
+              if len(matches) == 1:
+                  return matches[0]
+              return None
+
+
+          def select_by_name(token):
+              # SECONDARY path (the run #1-#4 lookup): exact name, then name-only.
+              # Returns None when nothing matches; fails only on ambiguity.
+              url = query_url(PROFILES_URL, [("filter[name]", PROFILE_NAME),
+                                              ("filter[profileType]", "MAC_APP_STORE"),
+                                              ("limit", "200")])
               data = api_get(url, token).get("data", [])
               if len(data) == 1:
                   return data[0]
@@ -388,17 +473,98 @@ jobs:
                        % (len(data), "; ".join(brief(d) for d in data)))
               print("No MAC_APP_STORE match for that name; retrying without the "
                     "profileType filter and selecting platform == MAC_OS...")
-              url = profiles_url([("filter[name]", PROFILE_NAME)])
+              url = query_url(PROFILES_URL, [("filter[name]", PROFILE_NAME),
+                                              ("limit", "200")])
               data = api_get(url, token).get("data", [])
               mac = [d for d in data
                      if d.get("attributes", {}).get("platform") == "MAC_OS"]
-              if len(mac) != 1:
+              if len(mac) == 1:
+                  return mac[0]
+              if len(mac) > 1:
                   fail("name-only query returned %d profile(s), %d of them with "
-                       "platform MAC_OS; expected exactly one MAC_OS profile named "
-                       "%r. Matches: %s"
-                       % (len(data), len(mac), PROFILE_NAME,
-                          "; ".join(brief(d) for d in data) or "(none)"))
-              return mac[0]
+                       "platform MAC_OS; expected exactly one. Matches: %s"
+                       % (len(data), len(mac), "; ".join(brief(d) for d in data)))
+              return None
+
+
+          def diagnostic_dump(token):
+              # Last resort before failing: list EVERYTHING this API key can see, so
+              # the log itself settles whether the Mac profile exists from the API
+              # side at all, and under what name/platform/type/state.
+              print("=== DIAGNOSTIC DUMP: every provisioning profile this API key "
+                    "can see ===")
+              entries = api_get_all(query_url(PROFILES_URL, [("limit", "200")]), token)
+              for e in entries:
+                  print("  " + brief(e))
+              print("=== END DIAGNOSTIC DUMP: %d profile(s) visible ===" % len(entries))
+
+
+          def select_profile(token):
+              entry = select_by_bundle_id(token)
+              if entry is not None:
+                  print("Selected via bundle ID: " + brief(entry))
+                  return entry
+              print("Bundle-ID path found no Mac App Store profile; falling back to "
+                    "the name-based lookup for %r..." % (PROFILE_NAME,))
+              entry = select_by_name(token)
+              if entry is not None:
+                  print("Selected via name: " + brief(entry))
+                  return entry
+              diagnostic_dump(token)
+              fail("no provisioning profile could be selected: the bundle-ID path "
+                   "found no MAC_OS/MAC_APP_STORE/ACTIVE profile for %s, and no "
+                   "profile is named %r. The diagnostic dump above lists everything "
+                   "this API key can see." % (BUNDLE_IDENTIFIER, PROFILE_NAME))
+
+
+          def codepoints(s):
+              return " ".join("U+%04X" % ord(c) for c in s)
+
+
+          def reconcile_workspace_specifier(internal_name):
+              # If the profile's TRUE internal Name differs from the name this step
+              # was given (and which the committed project.pbxproj still carries),
+              # patch the CHECKED-OUT pbxproj — workspace only, nothing is committed
+              # from CI — so this run's archive looks up the real profile instead of
+              # dying with the runs #1-#3 error. The repo itself must still be
+              # updated to the true name afterwards (MAC_PROFILE_NAME in
+              # macos-build.yml + the specifier in project.pbxproj); the log lines
+              # below print both names and their codepoints so the exact difference
+              # (e.g. an invisible character) is visible.
+              if internal_name == PROFILE_NAME:
+                  return
+              print("::warning::The profile's true internal Name %r differs from the "
+                    "expected name %r this step was given."
+                    % (internal_name, PROFILE_NAME))
+              print("  Expected name: %r" % (PROFILE_NAME,))
+              print("    codepoints:  " + codepoints(PROFILE_NAME))
+              print("  Internal name: %r" % (internal_name,))
+              print("    codepoints:  " + codepoints(internal_name))
+              try:
+                  with open(PBXPROJ_PATH, "r", encoding="utf-8") as f:
+                      lines = f.read().splitlines(keepends=True)
+              except OSError as e:
+                  print("::warning::Could not read %s to patch the specifier: %s"
+                        % (PBXPROJ_PATH, e))
+                  return
+              patched = 0
+              for i, line in enumerate(lines):
+                  if "PROVISIONING_PROFILE_SPECIFIER" in line and PROFILE_NAME in line:
+                      lines[i] = line.replace(PROFILE_NAME, internal_name)
+                      patched += 1
+              if patched == 0:
+                  print("::warning::No PROVISIONING_PROFILE_SPECIFIER line in %s "
+                        "contains %r; cannot auto-patch. Update the specifier there "
+                        "(and MAC_PROFILE_NAME in macos-build.yml) to %r."
+                        % (PBXPROJ_PATH, PROFILE_NAME, internal_name))
+                  return
+              with open(PBXPROJ_PATH, "w", encoding="utf-8") as f:
+                  f.writelines(lines)
+              print("Patched the checked-out %s: %d PROVISIONING_PROFILE_SPECIFIER "
+                    "line(s) now name %r, so THIS run's archive looks up the real "
+                    "profile. Workspace-only patch — the repo still names %r until "
+                    "it is updated to match." % (PBXPROJ_PATH, patched,
+                                                 internal_name, PROFILE_NAME))
 
 
           def main():
@@ -408,9 +574,6 @@ jobs:
               uuid = entry.get("id") or attrs.get("uuid")
               if not uuid:
                   fail("the matched profile has no id/uuid: %s" % brief(entry))
-              if attrs.get("name") not in (None, PROFILE_NAME):
-                  fail("API returned a profile whose name is %r, not %r."
-                       % (attrs.get("name"), PROFILE_NAME))
               if attrs.get("platform") not in (None, "MAC_OS"):
                   fail("API returned a profile whose platform is %r, not MAC_OS."
                        % (attrs.get("platform"),))
@@ -430,14 +593,32 @@ jobs:
                   fail("decoded profileContent (%d bytes) contains no plist; "
                        "refusing to install it." % len(content))
               plist = plistlib.loads(content[start:end + len(b"</plist>")])
-              if plist.get("Name") != PROFILE_NAME:
-                  fail("the downloaded .mobileprovision's internal Name is %r, "
-                       "not %r; refusing to install it."
-                       % (plist.get("Name"), PROFILE_NAME))
-              if plist.get("UUID") != uuid:
+              internal_name = plist.get("Name")
+              internal_uuid = plist.get("UUID")
+
+              # GROUND TRUTH, printed prominently: Xcode resolves
+              # PROVISIONING_PROFILE_SPECIFIER against the .mobileprovision's
+              # internal Name — NOT against the portal's display name and NOT
+              # against the API record's name attribute. If runs #1-#3 failed
+              # because the stored name differs invisibly from what the portal
+              # shows, the two lines below are where the truth appears.
+              print("")
+              print("=" * 72)
+              print("SELECTED PROFILE — internal contents of the .mobileprovision")
+              print("(this Name is the ground truth Xcode matches against):")
+              print("  Internal Name: %r" % (internal_name,))
+              print("  Internal UUID: %r" % (internal_uuid,))
+              print("=" * 72)
+
+              if internal_uuid != uuid:
                   fail("the downloaded .mobileprovision's internal UUID is %r, "
                        "but the API record id is %r; refusing to install it."
-                       % (plist.get("UUID"), uuid))
+                       % (internal_uuid, uuid))
+              api_name = attrs.get("name")
+              if api_name is not None and internal_name != api_name:
+                  fail("the API record name %r does not match the .mobileprovision's "
+                       "internal Name %r; refusing to install an inconsistent "
+                       "profile." % (api_name, internal_name))
 
               filename = uuid + ".mobileprovision"
               for directory in PROFILE_DIRS:
@@ -448,12 +629,16 @@ jobs:
                   print("Installed: " + dest)
 
               print("Provisioning profile installed from App Store Connect:")
-              print("  Name:           " + str(plist.get("Name")))
-              print("  UUID:           " + str(plist.get("UUID")))
+              print("  Name (file):    " + str(internal_name))
+              print("  Name (API):     " + str(api_name))
+              print("  UUID:           " + str(internal_uuid))
               print("  Platform (API): " + str(attrs.get("platform")))
               print("  Type (API):     " + str(attrs.get("profileType")))
+              print("  State (API):    " + str(attrs.get("profileState")))
               print("  Expires (API):  " + str(attrs.get("expirationDate")))
               print("  Expires (file): " + str(plist.get("ExpirationDate")))
+
+              reconcile_workspace_specifier(internal_name)
 
 
           if __name__ == "__main__":
