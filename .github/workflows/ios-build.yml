@@ -3,31 +3,33 @@ name: Build iOS IPA (Motivation)
 # MANUAL TRIGGER ONLY: this workflow never runs on its own — it only spends
 # macOS minutes when someone clicks "Run workflow" in the Actions tab.
 #
-# HUMAN PREREQUISITES (do these first, or the upload step will fail):
-#   1. In App Store Connect, create the app record for bundle ID
-#      com.beatrackfaminc.motivation (this repo has no ASC app record yet —
-#      the TestFlight upload will fail until this exists).
-#   2. In Apple Developer / App Store Connect, create an API key and add
-#      these four repo secrets (Settings, Secrets and variables, Actions):
-#        ASC_API_KEY_ID, ASC_API_KEY_P8, ASC_API_ISSUER_ID, APPLE_TEAM_ID
+# HUMAN PREREQUISITES (all DONE — verified in the Nov 27, 2026 portal
+# audit; listed here so nobody re-creates what already exists):
+#   1. The App Store Connect app record for bundle ID
+#      com.beatrackfaminc.motivation EXISTS (builds have uploaded to
+#      TestFlight). Do NOT create another one.
+#   2. The repo secrets are set (Settings, Secrets and variables,
+#      Actions): ASC_API_KEY_ID, ASC_API_KEY_P8, ASC_API_ISSUER_ID,
+#      APPLE_TEAM_ID (the Nov 24 ASC key), IOS_DISTRIBUTION_P12 and
+#      IOS_DISTRIBUTION_PASSWORD.
 #   3. APP CLIP (added Nov 10, 2026 — ships with 2.0): the clip App ID
-#      ALREADY exists in the Developer portal:
+#      and BOTH provisioning profiles ALREADY exist in the Developer
+#      portal with these EXACT names (character for character) — do NOT
+#      create new ones; edit/regenerate the existing ones in place only:
 #        App ID name: "Hustle And Heart Motivation App Clip"
 #        Clip bundle ID: com.beatrackfaminc.motivation.HustleandHeartMotivation
-#      BUT the clip has NO provisioning profile yet — create it in the
-#      portal NOW with this EXACT name (character for character):
-#        "Hustle And Heart Motivation App Clip"
-#      App Store distribution, for the clip App ID above, and it MUST
-#      include the current Apple Distribution certificate (the Nov 6 one).
-#      The archive step and ExportOptions below reference that exact name;
-#      if the profile is ever renamed, update the name in
-#      plugins/withAppClip.js (CLIP_PROFILE_NAME) AND in the ExportOptions
-#      plist in this file to match. The build uses -allowProvisioningUpdates,
-#      so once the profile exists the archive fetches it automatically.
-#      NOTE: the clip has no invocation URL yet (no appclips: associated
-#      domain / AASA entry), so it can't launch from a link or QR code in
-#      production — it can be tested on-device via a TestFlight Local
-#      Experience. Wiring invocation is a follow-up, not a build blocker.
+#        Main profile: "Hustle And Heart Motivation"
+#        Clip profile: "Hustle And Heart Motivation App Clip"
+#      The archive step and ExportOptions below reference those names;
+#      if a profile is ever renamed, update the name in
+#      plugins/withAppClip.js (MAIN_PROFILE_NAME / CLIP_PROFILE_NAME)
+#      AND in the ExportOptions plist in this file to match. The build
+#      uses -allowProvisioningUpdates, so the archive fetches the
+#      profiles automatically.
+#      Invocation IS wired: the clip entitlements carry BOTH
+#      applinks:beatrackfam.info and appclips:beatrackfam.info (Nov 10,
+#      2026) and the AASA file on beatrackfam.info lists this clip
+#      (re-verified Nov 27, 2026).
 #
 # Pattern copied from the proven workflow in the main BeaTrackFam app repo
 # (Joeey1116/BeaTrackFam-Mobile-App/.github/workflows/ios-build.yml).

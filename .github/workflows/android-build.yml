@@ -195,7 +195,7 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.beatrackfaminc.motivation
           releaseFiles: ${{ steps.ver.outputs.aab_file }}
-          track: production
+          tracks: production
           status: completed
 
       - name: Save the new build number back to the repo
