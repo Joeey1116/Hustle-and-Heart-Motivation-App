@@ -1,0 +1,323 @@
+name: Build tvOS (Motivation)
+
+# MANUAL TRIGGER ONLY: this workflow never runs on its own — it only spends
+# macOS minutes when someone clicks "Run workflow" in the Actions tab.
+#
+# tvOS ROLLOUT (Nov 27, 2026): replicates the PROVEN Flight Journal tvOS
+# pilot (FJ commit df930e5, merged to FJ main after passing all local
+# gates) in this app. Built on:
+#
+#   - react-native-tvos 0.86.3-0 — the React Native TV fork, version-matched
+#     to the app's RN 0.86.3. package.json aliases "react-native" to it
+#     (npm:react-native-tvos@0.86.3-0); the fork also builds the phone
+#     platforms, so iOS/Android/macOS/web keep working from the same tree.
+#   - @react-native-tvos/config-tv 0.1.7 — Expo config plugin. IMPORTANT:
+#     it does NOT create a tvOS target alongside iOS. With EXPO_TV=1 it
+#     CONVERTS the generated ios/ project in place (SDKROOT=appletvos,
+#     TARGETED_DEVICE_FAMILY=3, TVOS_DEPLOYMENT_TARGET from app.json,
+#     Podfile "platform :tvos", TVAppIcon brand assets from assets/tv/).
+#     app.json therefore carries the plugin with "isTV": false, so every
+#     normal iOS prebuild is untouched; ONLY this workflow sets EXPO_TV=1.
+#
+# APP CLIP + WIDGETS: App Clips and Live Activities/widgets are iOS-only.
+# plugins/withAppClip.js is a complete no-op when EXPO_TV=1, so the
+# converted tvOS project has NO clip target (verified locally Nov 27,
+# 2026: zero HustleHeartMotivationClip references in the tvOS prebuild
+# output). The Live Activity code (lib/liveActivity.ts) no-ops unless
+# Platform.OS === 'ios' and no widget extension target is generated.
+# There is no tvOS clip profile and nothing to embed.
+#
+# SIGNING (mirrors the macOS playbook): manual signing, ASC API key auth.
+# The provisioning profile is scoped IN THE GENERATED PROJECT by
+# plugins/with-tvos-signing.js (a prebuild plugin, so it survives
+# regeneration): when EXPO_TV=1 it sets, on the app target only,
+# CODE_SIGN_STYLE=Manual, DEVELOPMENT_TEAM=4ZLR77R534, and in Release
+# PROVISIONING_PROFILE_SPECIFIER="Hustle And Heart Motivation".
+# PROVISIONING_PROFILE_SPECIFIER is deliberately NOT passed on the
+# xcodebuild command line — a command-line value applies to EVERY target,
+# including CocoaPods/SPM targets that cannot carry profiles (macOS
+# run #4 in the sister apps failed exactly that way). The tvOS
+# provisioning profile in the Developer portal shares the iOS profile
+# NAME ("Hustle And Heart Motivation", tvOS platform) — note the "And"
+# spelling, NOT the Mac profile's "&". If it is ever renamed, update
+# TVOS_PROFILE_NAME below AND plugins/with-tvos-signing.js together,
+# character for character.
+#
+# ⚠️ NO AUTO-BUMP IN THIS WORKFLOW (same deliberate divergence as the Mac
+# workflow): version/build are READ from app.json and stamped at archive
+# time. App Store Connect rejects a second tvOS upload with the SAME
+# build number — advance the number before re-running (any iOS/Android
+# workflow run does it, or edit app.json's ios.buildNumber by hand).
+# There is intentionally no commit-back step here.
+#
+# HUMAN PREREQUISITES (Joey):
+#   1. tvOS platform added to the existing App Store Connect record for
+#      com.beatrackfaminc.motivation.
+#   2. tvOS App Store distribution profile "Hustle And Heart Motivation"
+#      created in the Developer portal.
+#   3. Repo secrets already exist from the iOS workflow:
+#      ASC_API_KEY_ID, ASC_API_KEY_P8, ASC_API_ISSUER_ID,
+#      APPLE_TEAM_ID, IOS_DISTRIBUTION_P12, IOS_DISTRIBUTION_PASSWORD
+#      (the same Apple Distribution certificate signs tvOS builds).
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_testflight:
+        description: 'Upload the .ipa to App Store Connect (TestFlight / tvOS App Store) after building'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  # ⚠️ Must match the tvOS profile name in the Developer portal exactly.
+  TVOS_PROFILE_NAME: 'Hustle And Heart Motivation'
+
+jobs:
+  build-tvos:
+    name: Archive Hustle & Heart Motivation tvOS (Release)
+    runs-on: macos-26
+    timeout-minutes: 120
+    # Supabase config for Together (partner features bundle at build
+    # time) — same job env as the iOS workflow. Without these, the app
+    # ships with NO backend configured and Together is dead.
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read app version and build number from app.json
+        # Read-only (no bump — see the header comment). The tvOS archive
+        # is stamped with these via MARKETING_VERSION /
+        # CURRENT_PROJECT_VERSION overrides at archive time.
+        run: |
+          echo "APP_VERSION=$(jq -r '.expo.version' app.json)" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$(jq -r '.expo.ios.buildNumber' app.json)" >> "$GITHUB_ENV"
+          echo "tvOS build will be stamped version $APP_VERSION ($APP_BUILD from app.json)."
+
+      - name: Select the newest Xcode on the runner
+        run: |
+          XC="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$XC" ]; then XC="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          echo "Using $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      # --legacy-peer-deps is required in ALL build workflows: the shared
+      # package.json carries react-native-macos@0.83.0 (peer react-native
+      # 0.83.10) while the app runs the react-native-tvos fork of RN
+      # 0.86, so a strict npm ci dies with ERESOLVE before anything
+      # installs. The flag only skips peer enforcement: the lockfile pins
+      # every version, so the installed tree is identical with or without
+      # it. Keep the flag in sync across ios/android/macos/tvos workflows.
+      - name: Install JS dependencies
+        run: npm ci --legacy-peer-deps
+        env:
+          EXPO_NO_TELEMETRY: '1'
+
+      - name: Generate the native project for tvOS (expo prebuild)
+        # EXPO_TV=1 is what turns this ios-platform prebuild into a tvOS
+        # project: @react-native-tvos/config-tv converts it in place,
+        # plugins/withAppClip.js no-ops (no clip/widgets on tvOS), and
+        # plugins/with-tvos-signing.js scopes the manual-signing settings
+        # + Release provisioning profile onto the app target.
+        run: npx expo prebuild -p ios --no-install
+        env:
+          EXPO_TV: '1'
+          EXPO_NO_TELEMETRY: '1'
+
+      - name: Verify the generated project is really tvOS (and clipless)
+        run: |
+          grep -q 'SDKROOT = appletvos' ios/HustleHeartMotivation.xcodeproj/project.pbxproj
+          grep -q 'platform :tvos' ios/Podfile
+          if grep -q 'HustleHeartMotivationClip' ios/HustleHeartMotivation.xcodeproj/project.pbxproj; then
+            echo "::error::App Clip target leaked into the tvOS project — App Clips are iOS-only."
+            exit 1
+          fi
+          if grep -qi 'WidgetExtension\|QuoteActivity' ios/HustleHeartMotivation.xcodeproj/project.pbxproj; then
+            echo "::error::Widget/Live Activity target leaked into the tvOS project — widgets are iOS-only."
+            exit 1
+          fi
+          grep -q 'PROVISIONING_PROFILE_SPECIFIER = "Hustle And Heart Motivation"' ios/HustleHeartMotivation.xcodeproj/project.pbxproj
+          echo "Generated project verified: tvOS SDKROOT, tvos Podfile, no clip/widget targets, in-project Release profile."
+
+      - name: Install CocoaPods (tvOS target)
+        working-directory: ios
+        run: pod install
+
+      - name: Write the App Store Connect API key
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          KEY_FILE="$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8"
+          mkdir -p "$HOME/private_keys"
+          raw="$ASC_API_KEY_P8"
+          # Undo common paste accidents: surrounding quotes, CR characters,
+          # and literal \n sequences instead of real line breaks.
+          raw="${raw#\"}"; raw="${raw%\"}"
+          raw="${raw#\'}"; raw="${raw%\'}"
+          raw="$(printf '%s' "$raw" | tr -d '\r')"
+          if [[ "$raw" != *$'\n'* ]]; then
+            raw="$(printf '%s' "$raw" | sed 's/\\n/\n/g')"
+          fi
+          # If the BEGIN/END lines were lost, wrap the base64 body again.
+          if [[ "$raw" != *"BEGIN PRIVATE KEY"* ]]; then
+            body="$(printf '%s' "$raw" | tr -d '[:space:]')"
+            raw="$(printf -- '-----BEGIN PRIVATE KEY-----\n%s\n-----END PRIVATE KEY-----\n' "$(printf '%s' "$body" | fold -w 64)")"
+          fi
+          printf '%s\n' "$raw" > "$KEY_FILE"
+          if ! openssl pkey -in "$KEY_FILE" -noout 2>/dev/null; then
+            echo "::error::The ASC_API_KEY_P8 secret is not a valid .p8 key. Re-paste the full contents of the .p8 file from App Store Connect, including the BEGIN/END lines."
+            exit 1
+          fi
+
+      - name: Import distribution certificate
+        env:
+          P12_B64: ${{ secrets.IOS_DISTRIBUTION_P12 }}
+          P12_PW: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
+        run: |
+          printf '%s' "$P12_B64" | base64 -d > "$RUNNER_TEMP/dist.p12"
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          # Never auto-lock mid-build: a locked keychain makes codesign hang
+          # silently (run #24 hung 1h53m in Embed Pods Frameworks).
+          security set-keychain-settings -lut 7200 build.keychain
+          # Search ONLY this keychain so a generic identity name can't resolve
+          # ambiguously against stale certs in the login keychain.
+          security list-keychains -d user -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import "$RUNNER_TEMP/dist.p12" -k build.keychain -P "$P12_PW" -T /usr/bin/codesign -T /usr/bin/xcodebuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          # Pin the exact signing identity (SHA-1) instead of the generic
+          # "iPhone Distribution" or "Apple Distribution" name.
+          IDENT_SHA=$(security find-identity -v -p codesigning build.keychain | grep -m1 -E 'iPhone Distribution|Apple Distribution' | awk '{print $2}')
+          if [ -z "$IDENT_SHA" ]; then
+            echo "::error::No iPhone/Apple Distribution identity found in build.keychain after import."
+            security find-identity -v -p codesigning build.keychain || true
+            exit 1
+          fi
+          echo "Using signing identity $IDENT_SHA"
+          echo "DIST_SIGN_IDENTITY=$IDENT_SHA" >> "$GITHUB_ENV"
+          echo "Certificate imported."
+
+      - name: Archive the tvOS app (manual signing)
+        # The provisioning profile is scoped IN THE PROJECT by
+        # plugins/with-tvos-signing.js at prebuild time and is
+        # deliberately NOT passed on this command line (see header).
+        # DEVELOPMENT_TEAM, CODE_SIGN_STYLE and CODE_SIGN_IDENTITY stay
+        # global here — they are harmless on CocoaPods/SPM targets.
+        timeout-minutes: 50
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -workspace ios/HustleHeartMotivation.xcworkspace \
+            -scheme HustleHeartMotivation \
+            -configuration Release \
+            -destination 'generic/platform=tvOS' \
+            -archivePath "$GITHUB_WORKSPACE/build/HustleHeartMotivation-tvOS.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$DIST_SIGN_IDENTITY" \
+            MARKETING_VERSION="$APP_VERSION" \
+            CURRENT_PROJECT_VERSION="$APP_BUILD"
+
+      - name: Export the IPA
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$GITHUB_WORKSPACE/build/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.beatrackfaminc.motivation</key>
+              <string>${TVOS_PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$GITHUB_WORKSPACE/build/HustleHeartMotivation-tvOS.xcarchive" \
+            -exportPath "$GITHUB_WORKSPACE/build/ipa" \
+            -exportOptionsPlist "$GITHUB_WORKSPACE/build/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
+
+      - name: Upload the IPA as a run artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: HustleHeartMotivation-tvOS-${{ env.APP_VERSION }}-${{ env.APP_BUILD }}-ipa
+          path: build/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the build to App Store Connect (TestFlight / tvOS App Store)
+        if: inputs.upload_to_testflight
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          IPA="$(ls "$GITHUB_WORKSPACE"/build/ipa/*.ipa | head -1)"
+          echo "Uploading $IPA to App Store Connect..."
+          # altool looks for AuthKey_<id>.p8 in ~/.appstoreconnect/private_keys
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$HOME/.appstoreconnect/private_keys/"
+          ok=""
+          for attempt in 1 2 3; do
+            echo "Upload attempt $attempt of 3..."
+            if xcrun altool --upload-app --type tvos --file "$IPA" \
+                 --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID"; then
+              ok=1; break
+            fi
+            sleep 20
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::Upload failed after 3 attempts. The IPA is still saved as a run artifact above — upload that file in Transporter instead."
+            exit 1
+          fi
+          echo "Uploaded. Apple processes the build (usually ~5-30 min), then it appears under the app's tvOS platform in App Store Connect / TestFlight."
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$HOME/private_keys"
