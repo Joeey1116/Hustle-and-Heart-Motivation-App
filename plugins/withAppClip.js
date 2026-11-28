@@ -478,6 +478,23 @@ const withAppClipXcodeProject = (config) =>
   });
 
 const withAppClip = (config) => {
+  // tvOS rollout (Nov 27, 2026, replicating the Flight Journal pilot):
+  // App Clips are iOS-only. When the @react-native-tvos/config-tv plugin
+  // converts the ios/ project for a tvOS build (EXPO_TV=1, set only by
+  // .github/workflows/tvos-build.yml), this plugin must be a complete
+  // no-op: no clip files, no clip target, no per-target profile changes —
+  // config-tv rewrites EVERY target in the project for tvOS, and a clip
+  // target would be converted/broken. The same applies to the Live
+  // Activity / widget machinery (expo-widgets, NSSupportsLiveActivities):
+  // it lives in the main app target and JS (lib/liveActivity.ts no-ops
+  // unless Platform.OS === 'ios'), and no widget extension target is
+  // generated, so nothing widget-shaped can leak into the tvOS project —
+  // the tvOS workflow's verify step fails the run if any clip/widget
+  // target appears. With EXPO_TV unset (every iOS/Android/macOS/web
+  // build), behavior is byte-for-byte what it was before this guard.
+  if (process.env.EXPO_TV === '1' || process.env.EXPO_TV === 'true') {
+    return config;
+  }
   config = withAppClipFiles(config);
   config = withAppClipXcodeProject(config);
   return config;

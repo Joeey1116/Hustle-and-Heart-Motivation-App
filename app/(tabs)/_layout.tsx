@@ -1,5 +1,8 @@
-import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Tabs } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import React from 'react';
+import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { useStrings } from '../../lib/i18n';
 import { useTheme } from '../../lib/themeContext';
 
@@ -54,7 +57,7 @@ import { useTheme } from '../../lib/themeContext';
  * Haven AI companion tab was removed in 2.0), Journal (Wellness
  * tools merged in), Settings.
  */
-export default function TabsLayout() {
+function NativeTabsLayout() {
   const { t } = useStrings();
   const { palette } = useTheme();
   return (
@@ -122,3 +125,124 @@ export default function TabsLayout() {
     </NativeTabs>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* tvOS fallback bar (Nov 27, 2026, replicating the Flight Journal    */
+/* pilot): NativeTabs (Liquid Glass UITabBar) is not the tvOS         */
+/* navigation model — Apple TV needs a focus-driven bar the Siri      */
+/* Remote can move through. The JS Tabs bar below is built from       */
+/* Pressables, which the react-native-tvos fork makes focusable with  */
+/* native focus events, so the same five tabs render and are          */
+/* reachable by remote. iOS/Android never take this branch            */
+/* (Platform.isTV is false there); the macOS build uses               */
+/* _layout.macos.tsx and never sees this file's navigator either.     */
+/* ------------------------------------------------------------------ */
+
+interface TvTabDef {
+  name: string;
+  labelKey: 'tabs.today' | 'tabs.browse' | 'tabs.music' | 'tabs.journal' | 'tabs.settings';
+  ion: { focused: keyof typeof Ionicons.glyphMap; outline: keyof typeof Ionicons.glyphMap };
+}
+
+const TV_TABS: TvTabDef[] = [
+  { name: 'index', labelKey: 'tabs.today', ion: { focused: 'sunny', outline: 'sunny-outline' } },
+  { name: 'browse', labelKey: 'tabs.browse', ion: { focused: 'grid', outline: 'grid-outline' } },
+  { name: 'music', labelKey: 'tabs.music', ion: { focused: 'musical-notes', outline: 'musical-notes-outline' } },
+  { name: 'journal', labelKey: 'tabs.journal', ion: { focused: 'book', outline: 'book-outline' } },
+  { name: 'settings', labelKey: 'tabs.settings', ion: { focused: 'settings', outline: 'settings-outline' } },
+];
+
+interface TvBarProps {
+  state: { index: number; routes: { key: string; name: string }[] };
+  navigation: {
+    emit: (e: { type: string; target: string; canPreventDefault: boolean }) => {
+      defaultPrevented: boolean;
+    };
+    navigate: (name: string) => void;
+  };
+  insets: { top: number; right: number; bottom: number; left: number };
+}
+
+function TvTabBar({ state, navigation, insets }: TvBarProps) {
+  const { t } = useStrings();
+  const { palette } = useTheme();
+  const barStyle: ViewStyle = {
+    paddingBottom: Math.max(insets.bottom, 8),
+    backgroundColor: palette.background,
+    borderTopColor: palette.border ?? 'rgba(255,255,255,0.12)',
+  };
+  return (
+    <View style={[tvStyles.bar, barStyle]}>
+      {state.routes.map((route, i) => {
+        const def = TV_TABS.find((tab) => tab.name === route.name) ?? TV_TABS[0];
+        const focused = state.index === i;
+        const onPress = () => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!focused && !event.defaultPrevented) {
+            navigation.navigate(route.name);
+          }
+        };
+        return (
+          <Pressable key={route.key} onPress={onPress} style={tvStyles.tab}>
+            <Ionicons
+              name={focused ? def.ion.focused : def.ion.outline}
+              size={22}
+              color={focused ? palette.tabActive : palette.tabInactive}
+            />
+            <Text
+              style={[
+                tvStyles.label,
+                { color: focused ? palette.tabActive : palette.tabInactive },
+                focused && tvStyles.labelActive,
+              ]}
+            >
+              {t(def.labelKey)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function TvTabsLayout() {
+  const { palette } = useTheme();
+  return (
+    <Tabs
+      tabBar={(props) => <TvTabBar {...(props as unknown as TvBarProps)} />}
+      screenOptions={{
+        headerShown: false,
+        sceneStyle: { backgroundColor: palette.background },
+      }}
+    >
+      {TV_TABS.map((tab) => (
+        <Tabs.Screen key={tab.name} name={tab.name} />
+      ))}
+    </Tabs>
+  );
+}
+
+export default function TabsLayout() {
+  // tvOS only: JS Tabs fallback (see the tvOS section above). Every
+  // other platform renders the NativeTabs layout exactly as before.
+  if ((Platform as unknown as { isTV?: boolean }).isTV) {
+    return <TvTabsLayout />;
+  }
+  return <NativeTabsLayout />;
+}
+
+const tvStyles = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    paddingTop: 8,
+    paddingHorizontal: 4,
+  },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 2 },
+  label: { fontSize: 10, fontWeight: '500' },
+  labelActive: { fontWeight: '700' },
+});

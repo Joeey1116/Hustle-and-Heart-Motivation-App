@@ -104,7 +104,24 @@
         }
       ],
       "./plugins/withNitroIapGradleProps",
-      "./plugins/withAppClip"
+      "./plugins/withAppClip",
+      [
+        "@react-native-tvos/config-tv",
+        {
+          "isTV": false,
+          "tvosDeploymentTarget": "16.4",
+          "appleTVImages": {
+            "icon": "./assets/tv/tvos-icon-1280x768.png",
+            "iconSmall": "./assets/tv/tvos-icon-small-400x240.png",
+            "iconSmall2x": "./assets/tv/tvos-icon-small2x-800x480.png",
+            "topShelf": "./assets/tv/tvos-topshelf-1920x720.png",
+            "topShelf2x": "./assets/tv/tvos-topshelf2x-3840x1440.png",
+            "topShelfWide": "./assets/tv/tvos-topshelf-wide-2320x720.png",
+            "topShelfWide2x": "./assets/tv/tvos-topshelf-wide2x-4640x1440.png"
+          }
+        }
+      ],
+      "./plugins/with-tvos-signing"
     ],
     "scheme": [
       "hustleandheart",
