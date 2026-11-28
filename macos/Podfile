@@ -23,18 +23,33 @@ ws_dir = ws_dir.parent until
   ws_dir.expand_path.to_s == '/'
 require "#{ws_dir}/node_modules/react-native-macos/scripts/react_native_pods.rb"
 
+# Expo modules autolinking (defines use_expo_modules!). Required —
+# see the note inside the target below.
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
+
 prepare_react_native_project!
 
 target 'above-all-macOS' do
   platform :macos, '14.0'
-  # NOTE: no use_expo_modules! here, deliberately. This is a plain
-  # react-native-macos target; Expo's autolinking wiring in ios/
-  # Podfile targets the iOS build. During install the CLI prints a
-  # warning that the Expo package's pods are not installed for this
-  # target — that warning is expected and non-fatal: the Mac app's JS
-  # bundle is produced by Metro (with macOS variants/stubs for modules
-  # that have no Mac native side), and pulling the Expo pod graph into
-  # the macOS target is out of scope for this rollout.
+  # Expo modules MUST be wired with use_expo_modules! (Microsoft's
+  # react-native-macos "Install Expo modules" guide; same pattern as
+  # ios/Podfile). This rollout originally omitted it, assuming the
+  # Expo pods' absence was a harmless warning — it is not:
+  # use_native_modules! still autolinks the umbrella `expo` package
+  # (the RN CLI config lists it, falling back to its ios config), but
+  # Expo.podspec only declares its ExpoModulesCore / ExpoModulesJSI
+  # dependencies when use_expo_modules! is defined — without it those
+  # pods are never installed (ExpoModulesCore is not a direct app
+  # dependency, so the CLI never sees it either), and the Expo pod
+  # then fails to compile on its first header line,
+  # `#import <ExpoModulesCore/ExpoModulesCore.h>` (proven on the
+  # Flight Journal Mac pilot, run #5, ~19 min into the archive).
+  # With use_expo_modules!, Expo's autolinking installs Expo +
+  # ExpoModulesCore + ExpoModulesJSI and every module whose podspec
+  # declares macOS support, and skips the iOS-only ones — those stay
+  # stubbed on the JS side by Metro, as before.
+  use_expo_modules!
+
   use_native_modules!
 
   # Flags change depending on the env values.
