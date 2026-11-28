@@ -253,6 +253,20 @@ jobs:
         # exactly-one the primary path requires — that path is kept
         # as-is, but in practice name matching is the path that lands.
         #
+        # WHAT RUN #6 PROVED (225b34b): the name fix WORKED — selection
+        # by exact name landed id N7ADW9MZZX, the profile downloaded,
+        # its internal Name matched, and pod install succeeded. But the
+        # step then REFUSED to install the correct profile: it compared
+        # the .mobileprovision's internal UUID against the ASC API
+        # resource "id" (N7ADW9MZZX) — two different identifier systems
+        # that can never be equal. The comparable API field is
+        # attributes.uuid, which carries the real profile UUID. The
+        # cross-check now compares against attributes.uuid ONLY; if
+        # that attribute is ever absent, the UUID cross-check is
+        # skipped and the internal-Name check gates the install alone.
+        # The resource id is never used as a UUID again — including as
+        # the installed filename, which is now the profile's own UUID.
+        #
         # Selection order: PRIMARY bundle ID (name-independent: resolve
         # the bundle ID resource for com.beatrackfaminc.motivation, list
         # the profiles attached to it, select platform MAC_OS +
@@ -277,7 +291,8 @@ jobs:
         #
         # Safeguards kept: selection fails loudly unless EXACTLY ONE
         # profile matches the criteria, the .mobileprovision's internal
-        # UUID must equal the API record id and its internal Name must
+        # UUID must equal the API record's attributes.uuid (NOT its
+        # resource id — see run #6 above) and its internal Name must
         # equal the API record name before anything is installed, and API
         # errors fail with the HTTP status + response body.
         # Implementation: an ES256 JWT built with python3 stdlib + the
@@ -617,9 +632,22 @@ jobs:
               token = make_jwt()
               entry = select_profile(token)
               attrs = entry.get("attributes", {})
-              uuid = entry.get("id") or attrs.get("uuid")
-              if not uuid:
-                  fail("the matched profile has no id/uuid: %s" % brief(entry))
+              # RUN #6 LESSON: the ASC API resource "id" (N7ADW9MZZX) is
+              # NOT the profile UUID. The .mobileprovision's internal UUID
+              # corresponds to the API record's attributes.uuid — the only
+              # field the file UUID may be compared against. Run #6
+              # selected and downloaded the CORRECT profile, then refused
+              # to install it by comparing the file's UUID against the
+              # resource id. If attributes.uuid is ever absent, skip the
+              # UUID cross-check entirely and let the internal-Name check
+              # below gate the install on its own — never compare the
+              # file's UUID against the resource id.
+              expected_uuid = attrs.get("uuid")
+              if not expected_uuid:
+                  print("::warning::The API record for %s carries no "
+                        "attributes.uuid; the UUID cross-check will be "
+                        "skipped and the internal-Name check alone will "
+                        "gate the install." % brief(entry))
               if attrs.get("platform") not in (None, "MAC_OS"):
                   fail("API returned a profile whose platform is %r, not MAC_OS."
                        % (attrs.get("platform"),))
@@ -656,17 +684,25 @@ jobs:
               print("  Internal UUID: %r" % (internal_uuid,))
               print("=" * 72)
 
-              if internal_uuid != uuid:
+              if not internal_uuid:
+                  fail("the downloaded .mobileprovision has no internal "
+                       "UUID; refusing to install it.")
+              if expected_uuid is not None and internal_uuid != expected_uuid:
                   fail("the downloaded .mobileprovision's internal UUID is %r, "
-                       "but the API record id is %r; refusing to install it."
-                       % (internal_uuid, uuid))
+                       "but the API record's attributes.uuid is %r; refusing "
+                       "to install it." % (internal_uuid, expected_uuid))
               api_name = attrs.get("name")
               if api_name is not None and internal_name != api_name:
                   fail("the API record name %r does not match the .mobileprovision's "
                        "internal Name %r; refusing to install an inconsistent "
                        "profile." % (api_name, internal_name))
 
-              filename = uuid + ".mobileprovision"
+              # Install under the profile's own UUID (the file's internal
+              # UUID, cross-checked against attributes.uuid above when the
+              # API provided one) — the conventional <UUID>.mobileprovision
+              # name. The API resource id is not a UUID and must never be
+              # used as the filename either.
+              filename = internal_uuid + ".mobileprovision"
               for directory in PROFILE_DIRS:
                   os.makedirs(directory, exist_ok=True)
                   dest = os.path.join(directory, filename)
