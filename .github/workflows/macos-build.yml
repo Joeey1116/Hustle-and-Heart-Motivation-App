@@ -205,6 +205,261 @@ jobs:
           echo "DIST_SIGN_IDENTITY=$IDENT_SHA" >> "$GITHUB_ENV"
           echo "Certificate imported."
 
+      - name: Install the Mac provisioning profile (downloaded from App Store Connect)
+        # WHY THIS STEP EXISTS (Nov 28, 2026 — Mac runs #1-#3): every
+        # archive attempt failed with
+        #   error: No profile for team matching
+        #   'Hustle & Heart Motivation' found
+        # even though the profile exists in the portal (macOS /
+        # App Store / com.beatrackfaminc.motivation / Valid, exp
+        # 2027-11-07), was regenerated in place (Edit -> Save), and
+        # this repo + workflow are verified 1:1 with the green
+        # Flight Journal and Rewards Mac setups. The one remaining
+        # difference: this profile's name is the only one in the
+        # fleet containing "&", and the leading theory is that
+        # Xcode's -allowProvisioningUpdates by-name fetch — the
+        # mechanism the green apps rely on; they install nothing —
+        # fails to match that name, so the profile never lands on
+        # the runner and manual signing has nothing to find.
+        #
+        # This step removes the fetch from the equation: using the
+        # SAME App Store Connect API key the archive step below
+        # authenticates with, it downloads the EXISTING profile
+        # from the ASC API and installs the .mobileprovision into
+        # both directories Xcode searches
+        # (~/Library/MobileDevice/Provisioning Profiles and
+        # ~/Library/Developer/Xcode/UserData/Provisioning Profiles).
+        # NO new profile is created and the portal record is
+        # untouched. The archive step is unchanged: with the profile
+        # physically installed, the app target's in-project
+        # PROVISIONING_PROFILE_SPECIFIER resolves locally.
+        #
+        # Self-diagnosing by design: the step fails loudly unless
+        # the API returns EXACTLY ONE Mac profile with this name,
+        # cross-checks the decoded .mobileprovision's internal
+        # Name/UUID against the API record before installing, and
+        # logs the installed profile's name, UUID, platform and
+        # expiration. Implementation: an ES256 JWT built with
+        # python3 stdlib + the openssl CLI (openssl's DER signature
+        # is converted to the raw R||S form JWT requires, in pure
+        # python) — no pip installs. The filter[name] value MUST be
+        # percent-encoded (the name's "&" would otherwise split the
+        # query string); the script encodes it with
+        # urllib.parse.quote.
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          python3 - "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$MAC_PROFILE_NAME" <<'PYEOF'
+          import base64
+          import json
+          import os
+          import plistlib
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          # Args: <authkey .p8 path> <ASC key id> <ASC issuer id> <exact profile name>
+          KEY_PATH = sys.argv[1]
+          KEY_ID = sys.argv[2]
+          ISSUER_ID = sys.argv[3]
+          PROFILE_NAME = sys.argv[4]
+
+          API_BASE = "https://api.appstoreconnect.apple.com/v1/profiles"
+          PROFILE_DIRS = [
+              os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles"),
+              os.path.expanduser("~/Library/Developer/Xcode/UserData/Provisioning Profiles"),
+          ]
+
+
+          def fail(msg):
+              # ::error:: makes the message a workflow annotation; stderr + exit 1
+              # fails the step loudly. Never include the JWT or key material here.
+              print("::error::Install Mac provisioning profile: " + msg, file=sys.stderr)
+              sys.exit(1)
+
+
+          def b64url(data):
+              return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+          def der_to_raw(der):
+              # openssl emits an ASN.1 DER ECDSA signature: SEQUENCE(INTEGER r, INTEGER s),
+              # each INTEGER big-endian and possibly 0x00-prefixed or shorter than 32 bytes.
+              # JWS (the JWT signature) needs the raw 64-byte form: r and s each padded to
+              # exactly 32 bytes, concatenated.
+              if len(der) < 2 or der[0] != 0x30:
+                  raise ValueError("signature is not a DER SEQUENCE")
+              idx = 2
+              if der[1] & 0x80:
+                  idx = 2 + (der[1] & 0x7F)
+              parts = []
+              for _ in range(2):
+                  if idx + 2 > len(der) or der[idx] != 0x02:
+                      raise ValueError("expected a DER INTEGER in the signature")
+                  ln = der[idx + 1]
+                  val = der[idx + 2: idx + 2 + ln].lstrip(b"\x00")
+                  if len(val) > 32:
+                      raise ValueError("ECDSA integer is longer than 32 bytes")
+                  parts.append(val.rjust(32, b"\x00"))
+                  idx += 2 + ln
+              return parts[0] + parts[1]
+
+
+          def make_jwt():
+              now = int(time.time())
+              header = {"alg": "ES256", "kid": KEY_ID, "typ": "JWT"}
+              # ASC rejects tokens whose exp is more than 20 minutes after iat;
+              # 19 minutes leaves a small clock-skew margin.
+              payload = {"iss": ISSUER_ID, "iat": now, "exp": now + 19 * 60,
+                         "aud": "appstoreconnect-v1"}
+              signing_input = (
+                  b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+                  + "."
+                  + b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+              )
+              tmpdir = tempfile.mkdtemp(prefix="asc-jwt-")
+              try:
+                  msg_path = os.path.join(tmpdir, "signing-input.txt")
+                  der_path = os.path.join(tmpdir, "signature.der")
+                  with open(msg_path, "wb") as f:
+                      f.write(signing_input.encode("ascii"))
+                  proc = subprocess.run(
+                      ["openssl", "dgst", "-sha256", "-sign", KEY_PATH,
+                       "-out", der_path, msg_path],
+                      capture_output=True, text=True)
+                  if proc.returncode != 0:
+                      fail("openssl could not sign the ASC JWT with %s: %s"
+                           % (KEY_PATH, proc.stderr.strip()))
+                  with open(der_path, "rb") as f:
+                      der = f.read()
+              finally:
+                  shutil.rmtree(tmpdir, ignore_errors=True)
+              return signing_input + "." + b64url(der_to_raw(der))
+
+
+          def profiles_url(params):
+              # Keys stay literal (filter[name]= is the API's canonical form); values
+              # are percent-encoded with safe="" so the "&" in the profile name becomes
+              # %26 instead of splitting the query into a bogus extra parameter.
+              qs = "&".join("%s=%s" % (k, urllib.parse.quote(v, safe=""))
+                            for k, v in params)
+              return API_BASE + "?" + qs
+
+
+          def api_get(url, token):
+              print("GET " + url)
+              req = urllib.request.Request(url, headers={
+                  "Authorization": "Bearer " + token,
+                  "Accept": "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      return json.loads(resp.read().decode("utf-8"))
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode("utf-8", "replace")
+                  fail("App Store Connect API returned HTTP %d. Response body:\n%s"
+                       % (e.code, body))
+              except urllib.error.URLError as e:
+                  fail("Could not reach the App Store Connect API: %s" % (e.reason,))
+
+
+          def brief(entry):
+              a = entry.get("attributes", {})
+              return "id=%s name=%r platform=%s profileType=%s" % (
+                  entry.get("id"), a.get("name"), a.get("platform"),
+                  a.get("profileType"))
+
+
+          def select_profile(token):
+              url = profiles_url([("filter[name]", PROFILE_NAME),
+                                  ("filter[profileType]", "MAC_APP_STORE")])
+              data = api_get(url, token).get("data", [])
+              if len(data) == 1:
+                  return data[0]
+              if len(data) > 1:
+                  fail("filter[name]+filter[profileType]=MAC_APP_STORE returned %d "
+                       "profiles; expected exactly one. Matches: %s"
+                       % (len(data), "; ".join(brief(d) for d in data)))
+              print("No MAC_APP_STORE match for that name; retrying without the "
+                    "profileType filter and selecting platform == MAC_OS...")
+              url = profiles_url([("filter[name]", PROFILE_NAME)])
+              data = api_get(url, token).get("data", [])
+              mac = [d for d in data
+                     if d.get("attributes", {}).get("platform") == "MAC_OS"]
+              if len(mac) != 1:
+                  fail("name-only query returned %d profile(s), %d of them with "
+                       "platform MAC_OS; expected exactly one MAC_OS profile named "
+                       "%r. Matches: %s"
+                       % (len(data), len(mac), PROFILE_NAME,
+                          "; ".join(brief(d) for d in data) or "(none)"))
+              return mac[0]
+
+
+          def main():
+              token = make_jwt()
+              entry = select_profile(token)
+              attrs = entry.get("attributes", {})
+              uuid = entry.get("id") or attrs.get("uuid")
+              if not uuid:
+                  fail("the matched profile has no id/uuid: %s" % brief(entry))
+              if attrs.get("name") not in (None, PROFILE_NAME):
+                  fail("API returned a profile whose name is %r, not %r."
+                       % (attrs.get("name"), PROFILE_NAME))
+              if attrs.get("platform") not in (None, "MAC_OS"):
+                  fail("API returned a profile whose platform is %r, not MAC_OS."
+                       % (attrs.get("platform"),))
+              content_b64 = attrs.get("profileContent")
+              if not content_b64:
+                  fail("the matched profile (%s) has no profileContent to install."
+                       % brief(entry))
+              content = base64.b64decode(content_b64)
+
+              # The .mobileprovision is a CMS-signed plist: pull the XML plist out of
+              # the decoded bytes and cross-check it against the API record BEFORE
+              # installing anything, so a wrong or corrupt download fails here with a
+              # clear message instead of surfacing as a signing error at archive time.
+              start = content.find(b"<?xml")
+              end = content.find(b"</plist>")
+              if start < 0 or end < 0:
+                  fail("decoded profileContent (%d bytes) contains no plist; "
+                       "refusing to install it." % len(content))
+              plist = plistlib.loads(content[start:end + len(b"</plist>")])
+              if plist.get("Name") != PROFILE_NAME:
+                  fail("the downloaded .mobileprovision's internal Name is %r, "
+                       "not %r; refusing to install it."
+                       % (plist.get("Name"), PROFILE_NAME))
+              if plist.get("UUID") != uuid:
+                  fail("the downloaded .mobileprovision's internal UUID is %r, "
+                       "but the API record id is %r; refusing to install it."
+                       % (plist.get("UUID"), uuid))
+
+              filename = uuid + ".mobileprovision"
+              for directory in PROFILE_DIRS:
+                  os.makedirs(directory, exist_ok=True)
+                  dest = os.path.join(directory, filename)
+                  with open(dest, "wb") as f:
+                      f.write(content)
+                  print("Installed: " + dest)
+
+              print("Provisioning profile installed from App Store Connect:")
+              print("  Name:           " + str(plist.get("Name")))
+              print("  UUID:           " + str(plist.get("UUID")))
+              print("  Platform (API): " + str(attrs.get("platform")))
+              print("  Type (API):     " + str(attrs.get("profileType")))
+              print("  Expires (API):  " + str(attrs.get("expirationDate")))
+              print("  Expires (file): " + str(plist.get("ExpirationDate")))
+
+
+          if __name__ == "__main__":
+              main()
+          PYEOF
+
       - name: Archive the Mac app (manual signing)
         # Step-level cap: a healthy archive finishes well under this.
         # The provisioning profile is scoped IN THE PROJECT — the app
