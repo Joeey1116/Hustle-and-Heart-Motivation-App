@@ -10,26 +10,23 @@ name: Build macOS (Motivation)
 # lib/notifications.macos.ts no-op local notifications) and the
 # metro.config.js macOS resolver shim.
 #
-# ⚠️ PROFILE NAME — NOTE THE AMPERSAND:
+# ⚠️ PROFILE NAME — "And" SPELLED OUT, SAME AS iOS:
 # The archive/export steps below expect a Mac App Store Connect
 # distribution profile named exactly:
 #
-#     Hustle & Heart Motivation
+#     Hustle And Heart Motivation
 #
-# That is the MAC profile's name, with "&". The iOS profile is spelled
-# "Hustle And Heart Motivation" — do NOT copy the iOS spelling here; if
-# the Mac profile is ever renamed in the portal, update MAC_PROFILE_NAME
+# (ASC profile id N7ADW9MZZX, platform MAC_OS, type MAC_APP_STORE,
+# state ACTIVE.) Settled by run #5's diagnostic dump (Nov 28, 2026):
+# the API key sees 34 profiles and Motivation's Mac profile is the
+# one above — NO profile with an ampersand in its name exists
+# anywhere in the account. Runs #1-#5 failed because this repo
+# carried the ampersand spelling (the app's display name) as the Mac
+# profile name; the portal profile was never named that. If the Mac
+# profile is ever renamed in the portal, update MAC_PROFILE_NAME
 # below AND the PROVISIONING_PROFILE_SPECIFIER in
 # macos/above-all.xcodeproj/project.pbxproj together (the export step
 # no longer names a profile — see its comment), or signing will fail.
-#
-# ⚠️ RUN #4 CAVEAT (Nov 28, 2026): the ASC API reports ZERO profiles
-# under the name above — its true stored name may differ invisibly
-# from the portal display. The "Install the Mac provisioning
-# profile" step below now selects by bundle ID and prints the
-# profile's true internal Name; if that name differs from the one
-# above, update MAC_PROFILE_NAME AND the specifier to the true name
-# (that is a rename to match reality, not a portal change).
 #
 # ⚠️ VERSION MISMATCH RISK (known, accepted, same as the Flight Journal
 # pilot): the app runs react-native 0.86 (Expo SDK 57). react-native-
@@ -83,20 +80,22 @@ permissions:
   contents: read
 
 env:
-  # ⚠️ Must match the Mac profile name in the Developer portal exactly
-  # (ampersand — NOT the iOS profile's "Hustle And Heart Motivation") —
-  # this is the canonical record of the name the app target's
+  # ⚠️ Must match the Mac profile name in App Store Connect exactly —
+  # "And" spelled out, the SAME spelling as the iOS/tvOS profiles (run
+  # #5's diagnostic dump: profile id N7ADW9MZZX, MAC_OS / MAC_APP_STORE
+  # / ACTIVE; no ampersand-spelled profile exists in the account).
+  # This is the canonical record of the name the app target's
   # PROVISIONING_PROFILE_SPECIFIER (in the macos project) must carry.
   # The export step no longer reads it (automatic signing, run #9 fix
   # pattern from the Flight Journal pilot).
-  # Run #4 caveat: the ASC API sees no profile under this name; the
-  # install step treats it as the EXPECTED name only and prints the
-  # true internal name it finds — update this value if they differ.
-  MAC_PROFILE_NAME: 'Hustle & Heart Motivation'
+  # MAC_PROFILE_ID is the same profile's ASC id; the install step uses
+  # it as a last-resort selector if name matching ever fails.
+  MAC_PROFILE_NAME: 'Hustle And Heart Motivation'
+  MAC_PROFILE_ID: 'N7ADW9MZZX'
 
 jobs:
   build-macos:
-    name: Archive Hustle & Heart Motivation macOS (Release)
+    name: Archive Hustle And Heart Motivation macOS (Release)
     runs-on: macos-26
     timeout-minutes: 120
     # Supabase config for optional sign-in / Together features — same
@@ -218,9 +217,11 @@ jobs:
 
       - name: Install the Mac provisioning profile (downloaded from App Store Connect)
         # WHY THIS STEP EXISTS (Nov 28, 2026 — Mac runs #1-#3): every
-        # archive attempt failed with
-        #   error: No profile for team matching
-        #   'Hustle & Heart Motivation' found
+        # archive attempt failed with "No profile for team matching
+        # '<name>' found", where <name> was the ampersand spelling of
+        # the app's name that this repo then carried as the Mac profile
+        # name — a name no profile in the account has ever had (run #5,
+        # below) —
         # even though the profile shows in the portal (macOS / App Store /
         # com.beatrackfaminc.motivation / Valid, exp 2027-11-07), was
         # regenerated in place (Edit -> Save), and this repo + workflow are
@@ -236,20 +237,30 @@ jobs:
         #
         # WHAT RUN #4 PROVED (first version of this step, 459450c): both
         # name queries executed cleanly and the API returned ZERO profiles
-        # named 'Hustle & Heart Motivation' — name+MAC_APP_STORE and
-        # name-only alike. From the API's point of view that exact name
-        # does not exist, which would ALSO explain runs #1-#3: Xcode's
-        # by-name lookup misses for the same reason. Leading theory: the
-        # profile's true stored name differs from the portal display by
-        # some character nobody can see (an invisible or look-alike
-        # character in the stored name).
+        # under the ampersand spelling — name+MAC_APP_STORE and name-only
+        # alike. From the API's point of view that exact name does not
+        # exist, which would ALSO explain runs #1-#3: Xcode's by-name
+        # lookup misses for the same reason.
         #
-        # So the lookup is now NAME-INDEPENDENT. PRIMARY: resolve the
-        # bundle ID resource for com.beatrackfaminc.motivation, list the
-        # profiles attached to it, and select the one with platform MAC_OS
-        # + profileType MAC_APP_STORE + profileState ACTIVE. The old name
-        # queries remain only as a secondary path. If BOTH paths find
-        # nothing, the step dumps EVERY profile this API key can see
+        # WHAT RUN #5 SETTLED: its diagnostic dump listed all 34 profiles
+        # the API key can see. Motivation's Mac profile EXISTS and is
+        # ACTIVE — id N7ADW9MZZX, name "Hustle And Heart Motivation"
+        # ("And" spelled out, the same spelling as all of Motivation's
+        # iOS/tvOS profiles), platform MAC_OS, type MAC_APP_STORE. The
+        # repo now carries that true name (MAC_PROFILE_NAME + the pbxproj
+        # specifier). Run #5's bundle-ID path also bailed before trying:
+        # the identifier resolved to FOUR bundle ID resources, not the
+        # exactly-one the primary path requires — that path is kept
+        # as-is, but in practice name matching is the path that lands.
+        #
+        # Selection order: PRIMARY bundle ID (name-independent: resolve
+        # the bundle ID resource for com.beatrackfaminc.motivation, list
+        # the profiles attached to it, select platform MAC_OS +
+        # profileType MAC_APP_STORE + profileState ACTIVE), then exact
+        # name, then — as a final fallback — the profile id N7ADW9MZZX
+        # from run #5's dump, so a future portal rename cannot strand
+        # the build on name matching alone. If ALL paths find nothing,
+        # the step dumps EVERY profile this API key can see
         # (name/platform/type/state, paginated) into the log before
         # failing, which settles whether the profile exists from the API
         # side at all.
@@ -279,7 +290,7 @@ jobs:
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
           APP_BUNDLE_ID: 'com.beatrackfaminc.motivation'
         run: |
-          python3 - "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$MAC_PROFILE_NAME" "$APP_BUNDLE_ID" <<'PYEOF'
+          python3 - "$HOME/private_keys/AuthKey_${ASC_API_KEY_ID}.p8" "$ASC_API_KEY_ID" "$ASC_API_ISSUER_ID" "$MAC_PROFILE_NAME" "$APP_BUNDLE_ID" "$MAC_PROFILE_ID" <<'PYEOF'
           import base64
           import json
           import os
@@ -293,12 +304,13 @@ jobs:
           import urllib.parse
           import urllib.request
 
-          # Args: <authkey .p8 path> <ASC key id> <ASC issuer id> <expected profile name> <app bundle identifier>
+          # Args: <authkey .p8 path> <ASC key id> <ASC issuer id> <expected profile name> <app bundle identifier> <known-good profile id>
           KEY_PATH = sys.argv[1]
           KEY_ID = sys.argv[2]
           ISSUER_ID = sys.argv[3]
           PROFILE_NAME = sys.argv[4]
           BUNDLE_IDENTIFIER = sys.argv[5]
+          PROFILE_ID = sys.argv[6] if len(sys.argv) > 6 else ""
 
           ASC_BASE = "https://api.appstoreconnect.apple.com/v1"
           PROFILES_URL = ASC_BASE + "/profiles"
@@ -487,6 +499,32 @@ jobs:
               return None
 
 
+          def select_by_id(token):
+              # FINAL FALLBACK: fetch the profile by its ASC id — N7ADW9MZZX,
+              # captured from run #5's diagnostic dump, where the Mac profile
+              # appears as "Hustle And Heart Motivation" (MAC_OS /
+              # MAC_APP_STORE / ACTIVE). Reached only when both the bundle-ID
+              # and exact-name paths come up empty, so a future portal rename
+              # cannot strand the build on name matching alone. The record
+              # must still pass the same platform/type/state check as every
+              # other path before it is used; an API error (e.g. 404) fails
+              # loudly via api_get, like everywhere else in this step.
+              if not PROFILE_ID:
+                  print("No fallback profile id configured; skipping the "
+                        "profile-id path.")
+                  return None
+              entry = api_get(PROFILES_URL + "/" + PROFILE_ID, token).get("data")
+              if entry is None:
+                  print("Profile-id lookup for %s returned no record."
+                        % PROFILE_ID)
+                  return None
+              if not is_mac_store_active(entry):
+                  fail("profile id %s resolved to %s, which is not a "
+                       "MAC_OS/MAC_APP_STORE/ACTIVE profile; refusing to "
+                       "use it." % (PROFILE_ID, brief(entry)))
+              return entry
+
+
           def diagnostic_dump(token):
               # Last resort before failing: list EVERYTHING this API key can see, so
               # the log itself settles whether the Mac profile exists from the API
@@ -510,11 +548,19 @@ jobs:
               if entry is not None:
                   print("Selected via name: " + brief(entry))
                   return entry
+              print("Name lookup found nothing either; falling back to the "
+                    "profile-id lookup for %s..." % (PROFILE_ID,))
+              entry = select_by_id(token)
+              if entry is not None:
+                  print("Selected via profile id: " + brief(entry))
+                  return entry
               diagnostic_dump(token)
               fail("no provisioning profile could be selected: the bundle-ID path "
-                   "found no MAC_OS/MAC_APP_STORE/ACTIVE profile for %s, and no "
-                   "profile is named %r. The diagnostic dump above lists everything "
-                   "this API key can see." % (BUNDLE_IDENTIFIER, PROFILE_NAME))
+                   "found no MAC_OS/MAC_APP_STORE/ACTIVE profile for %s, no "
+                   "profile is named %r, and the profile-id fallback (%s) found "
+                   "nothing usable. The diagnostic dump above lists everything "
+                   "this API key can see." % (BUNDLE_IDENTIFIER, PROFILE_NAME,
+                                              PROFILE_ID))
 
 
           def codepoints(s):
@@ -650,7 +696,7 @@ jobs:
         # The provisioning profile is scoped IN THE PROJECT — the app
         # target's Release configuration in
         # macos/above-all.xcodeproj/project.pbxproj carries
-        # PROVISIONING_PROFILE_SPECIFIER = "Hustle & Heart Motivation"
+        # PROVISIONING_PROFILE_SPECIFIER = "Hustle And Heart Motivation"
         # — and is deliberately NOT passed on this command line: a
         # command-line PROVISIONING_PROFILE_SPECIFIER applies to
         # EVERY target in the workspace, and the Flight Journal pilot

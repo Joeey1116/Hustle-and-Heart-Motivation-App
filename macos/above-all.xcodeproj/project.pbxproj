@@ -372,7 +372,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.beatrackfaminc.motivation;
 				PRODUCT_NAME = above-all;
-				PROVISIONING_PROFILE_SPECIFIER = "Hustle & Heart Motivation";
+				PROVISIONING_PROFILE_SPECIFIER = "Hustle And Heart Motivation";
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
 			};
