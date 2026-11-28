@@ -64,5 +64,34 @@ target 'above-all-macOS' do
 
   post_install do |installer|
     react_native_post_install(installer)
+
+    # Point ExpoModulesJSI's xcframework script phase at THIS target's
+    # React Native (react-native-macos), not the app's iOS react-native.
+    # The pod builds itself via a script phase (scripts/build-
+    # xcframework.sh) that resolves RN_ROOT by node-resolving
+    # `react-native/package.json` unless REACT_NATIVE_PATH is set as a
+    # build setting (the mechanism the script itself documents, used by
+    # Expo Go). Without it, RN_ROOT is the iOS react-native 0.86.3, and
+    # ExpoModulesJSI's Package.swift then finds 0.86's
+    # <cxxreact/ReactNativeVersion.h> while <jsi/jsi.h> comes from
+    # react-native-macos 0.83's React-jsi pod. ExpoModulesJSI's
+    # IRuntimeCompat.h keys its `using IRuntime = Runtime;` alias (the
+    # bridge for pre-0.86 JSI) on that version header — reading 0.86
+    # disables the alias, and the pod dies compiling against the 0.83
+    # jsi.h, which has no IRuntime (proven failure: Flight Journal Mac
+    # run #6 and Rewards Mac run #1, exit 65, ~12 min into the archive).
+    # With REACT_NATIVE_PATH set to react-native-macos, the version
+    # header reads 0.83, the alias fires, and the pod compiles against
+    # the same JSI it links against. Scoped to this pod target and to
+    # the macOS Podfile only; iOS/tvOS/Android are unaffected.
+    jsi_rn_path = File.expand_path('../node_modules/react-native-macos',
+                                   installer.config.installation_root)
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'ExpoModulesJSI'
+
+      target.build_configurations.each do |config|
+        config.build_settings['REACT_NATIVE_PATH'] = jsi_rn_path
+      end
+    end
   end
 end
