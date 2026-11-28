@@ -22,14 +22,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   let reactNativeFactory: RCTReactNativeFactory
 
   override init() {
-    super.init()
-
+    // NOTE: the react-native-macos 0.83 template assigns these `let`
+    // properties AFTER super.init(), which Swift's definite-initialization
+    // rules reject ("may only be initialized once" / "not initialized at
+    // super.init call"). Stored properties of this class must be assigned
+    // BEFORE super.init(); creating the delegate/factory as locals first
+    // does not touch `self`, so this ordering is legal and behaves
+    // identically.
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
 
     reactNativeDelegate = delegate
     reactNativeFactory = factory
+
+    super.init()
   }
 }
 

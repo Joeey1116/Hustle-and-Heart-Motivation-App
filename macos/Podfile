@@ -93,5 +93,59 @@ target 'above-all-macOS' do
         config.build_settings['REACT_NATIVE_PATH'] = jsi_rn_path
       end
     end
+
+    # Replace the glog modulemap CocoaPods generates for this install
+    # with the textual-header modulemap React Native 0.84+ ships.
+    # RN 0.86's glog.podspec declares module_map =
+    # 'src/glog/module.modulemap' (written by its
+    # ios-configure-glog.sh prepare command for exactly this bug);
+    # the react-native-macos 0.83 fork's podspec and script predate
+    # that fix and declare no module_map, so CocoaPods generates one
+    # with a `module * { export * }` wildcard — which turns every
+    # glog header into its own submodule (glog.glog.log_severity,
+    # ...). glog's logging.h #includes log_severity.h from inside
+    # `namespace google`, so when NitroModules' Swift compile loads
+    # React's headers (NitroModules-umbrella.h -> ReactProp.hpp ->
+    # ConcreteComponentDescriptor.h -> react_native_assert.h ->
+    # <glog/logging.h>) with that modulemap passed via -Xcc, Clang
+    # turns the nested include into a submodule import inside a
+    # namespace — illegal — and reports "import of module
+    # 'glog.glog.log_severity' appears within namespace 'google'" /
+    # "could not build module 'glog'", failing the whole
+    # NitroModules module build (Mac run #7, exit 65, after the
+    # ExpoModulesJSI fix had already cleared the compile up to this
+    # target). Declaring glog's five public headers `textual` keeps
+    # them inside the single glog module — no submodules are created,
+    # so the nested include stays a textual include and is legal in
+    # any namespace. This is the workaround documented for this exact
+    # error with react-native-nitro-modules 0.37 on RN <= 0.83
+    # (margelo/nitro#1573); the header list and `export *` mirror
+    # RN 0.86's shipped modulemap, with paths prefixed 'glog/' for
+    # resolution from the Pods header search paths. Both locations
+    # CocoaPods writes the generated modulemap to are patched (the
+    # public-headers copy consumers resolve the module through, and
+    # the glog target's own Target Support Files copy), each only if
+    # it exists. Scoped to this macOS Podfile's Pods sandbox; the iOS
+    # install uses RN 0.86's podspec, which already ships the textual
+    # modulemap, and is untouched.
+    glog_textual_modulemap = <<~MODULEMAP
+      module glog {
+        textual header "glog/log_severity.h"
+        textual header "glog/logging.h"
+        textual header "glog/raw_logging.h"
+        textual header "glog/stl_logging.h"
+        textual header "glog/vlog_is_on.h"
+        export *
+      }
+    MODULEMAP
+    [
+      File.join(installer.sandbox.public_headers.root, 'glog', 'glog.modulemap'),
+      File.join(installer.sandbox.root, 'Target Support Files', 'glog', 'glog.modulemap'),
+    ].each do |modulemap_path|
+      next unless File.exist?(modulemap_path)
+
+      File.delete(modulemap_path)
+      File.write(modulemap_path, glog_textual_modulemap)
+    end
   end
 end
